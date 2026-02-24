@@ -6,7 +6,7 @@ import { SignUp, SignIn } from "../interface/Auth/user-scheme";
 import type { SignUpData, SignInData } from "../interface/Auth/user-scheme";
 
 export const authClient = createAuthClient({
-    baseURL: "http://localhost:3000",
+    baseURL: "https://oddity-back.onrender.com",
     plugins: [
         adminClient(),
         inferAdditionalFields({
