@@ -1,0 +1,123 @@
+@import "tailwindcss";
+@plugin "tailwindcss-animate";
+
+@theme {
+  --color-secondary: #0F172A;
+  --color-primary: #F18F01;
+  --color-custom-white: #FFFFFF;
+  --color-custom-beige: #F1F0EA;
+  --color-dark: #12100E;
+}
+
+@layer base {
+  body {
+    @apply transition-colors duration-500 min-h-screen;
+    background-color: var(--color-dark);
+    color: #F1F0EA;
+  }
+
+  body.light {
+    background-color: #F8F9FA;
+    color: #0F172A;
+  }
+
+  /* --- Global Text Normalization --- */
+
+  /* Headings: Secondary (Dark Blue) in Light, White in Dark */
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    @apply transition-colors duration-300;
+    color: #FFFFFF;
+  }
+
+  .light h1,
+  .light h2,
+  .light h3,
+  .light h4,
+  .light h5,
+  .light h6 {
+    color: var(--color-secondary);
+  }
+
+  /* Paragraphs & General text: Faded Beige in Dark, Slate-600 in Light */
+  p,
+  span,
+  label {
+    @apply transition-colors duration-300;
+    color: rgba(241, 240, 234, 0.7);
+  }
+
+  .light p,
+  .light span,
+  .light label {
+    color: #475569;
+    /* slate-600 */
+  }
+
+  /* Enforce bold/important text remains visible */
+  .font-bold,
+  .font-black {
+    color: #FFFFFF;
+  }
+
+  .light .font-bold,
+  .light .font-black {
+    color: var(--color-secondary) !important;
+  }
+
+  /* Inputs & Forms */
+  input,
+  textarea,
+  select {
+    @apply transition-colors duration-300;
+    color: #FFFFFF;
+  }
+
+  .light input,
+  .light textarea,
+  .light select {
+    color: var(--color-secondary);
+  }
+
+  /* Utility Overrides for Visibility */
+  .light .opacity-50,
+  .light .opacity-60,
+  .light .opacity-70 {
+    opacity: 0.8 !important;
+  }
+
+  .dark .opacity-50,
+  .dark .opacity-60,
+  .dark .opacity-70 {
+    opacity: 0.6 !important;
+  }
+
+  .light .opacity-20,
+  .light .opacity-30 {
+    opacity: 0.5 !important;
+  }
+}
+
+@layer components {
+
+  /* Surface primitives to prevent "Leaking" */
+  .surface-card {
+    @apply bg-white/5 border border-white/10 shadow-sm transition-all;
+  }
+
+  .light .surface-card {
+    @apply bg-white border-slate-200 shadow-md;
+  }
+
+  .surface-panel {
+    @apply bg-transparent;
+  }
+
+  .light .surface-panel {
+    @apply bg-slate-50/50;
+  }
+}
