@@ -1,4 +1,6 @@
-export const API_URL = "https://oddity-back.onrender.com";
+// export const API_URL = "https://oddity-back.onrender.com";
+export const API_URL = "http://localhost:3000";
+
 
 /**
  * Cliente base fetcher para manejar las peticiones a la API.
@@ -83,6 +85,7 @@ export interface CreateCustomAgentDto {
     organizationId: number;
     mode?: "CHAT" | "FILE" | "IMAGE" | "VIDEO";
     modelId?: number;
+    expectedOutput?: "text" | "excel" | "pdf";
     isActive?: boolean;
 }
 
@@ -103,52 +106,58 @@ export interface CustomAgent extends CreateCustomAgentDto {
 export const oddityClient = {
     organization: {
         create: (data: CreateOrganizationDto) =>
-            fetchClient<Organization>('/organization', { method: 'POST', body: JSON.stringify(data) }),
+            fetchClient<Organization>('/api/organization', { method: 'POST', body: JSON.stringify(data) }),
         findAll: () =>
-            fetchClient<Organization[]>('/organization', { method: 'GET' }),
+            fetchClient<Organization[]>('/api/organization', { method: 'GET' }),
         findOne: (id: string | number) =>
-            fetchClient<Organization>(`/organization/${id}`, { method: 'GET' }),
+            fetchClient<Organization>(`/api/organization/${id}`, { method: 'GET' }),
         findUsers: (id: string | number) =>
-            fetchClient<any[]>(`/organization/${id}/users`, { method: 'GET' }),
+            fetchClient<any[]>(`/api/organization/${id}/users`, { method: 'GET' }),
         getUsageStats: (id: string | number, period: 'today' | '30d' | '90d' = '30d') =>
-            fetchClient<any>(`/organization/${id}/usage-stats?period=${period}`, { method: 'GET' }),
+            fetchClient<any>(`/api/organization/${id}/usage-stats?period=${period}`, { method: 'GET' }),
         update: (id: string | number, data: UpdateOrganizationDto) =>
-            fetchClient<Organization>(`/organization/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+            fetchClient<Organization>(`/api/organization/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
         remove: (id: string | number) =>
-            fetchClient<void>(`/organization/${id}`, { method: 'DELETE' }),
+            fetchClient<void>(`/api/organization/${id}`, { method: 'DELETE' }),
     },
 
     iaModel: {
         // Nota: Asumiendo que el controlador de Nest es `@Controller('api/ia-model')`
         create: (data: CreateIaModelDto) =>
-            fetchClient<IaModel>('/ia-model', { method: 'POST', body: JSON.stringify(data) }),
+            fetchClient<IaModel>('/api/ia-model', { method: 'POST', body: JSON.stringify(data) }),
         findAll: () =>
-            fetchClient<IaModel[]>('/ia-model', { method: 'GET' }),
+            fetchClient<IaModel[]>('/api/ia-model', { method: 'GET' }),
         findOne: (id: string | number) =>
-            fetchClient<IaModel>(`/ia-model/${id}`, { method: 'GET' }),
+            fetchClient<IaModel>(`/api/ia-model/${id}`, { method: 'GET' }),
         update: (id: string | number, data: UpdateIaModelDto) =>
-            fetchClient<IaModel>(`/ia-model/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+            fetchClient<IaModel>(`/api/ia-model/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
         remove: (id: string | number) =>
-            fetchClient<void>(`/ia-model/${id}`, { method: 'DELETE' }),
+            fetchClient<void>(`/api/ia-model/${id}`, { method: 'DELETE' }),
     },
 
     customAgent: {
         // Nota: Asumiendo que el controlador de Nest es `@Controller('api/custom-agent')`
         create: (data: CreateCustomAgentDto) =>
-            fetchClient<CustomAgent>('/custom-agent', { method: 'POST', body: JSON.stringify(data) }),
+            fetchClient<CustomAgent>('/api/custom-agent', { method: 'POST', body: JSON.stringify(data) }),
         findAll: () =>
-            fetchClient<CustomAgent[]>('/custom-agent', { method: 'GET' }),
+            fetchClient<CustomAgent[]>('/api/custom-agent', { method: 'GET' }),
         findOne: (id: string | number) =>
-            fetchClient<CustomAgent>(`/custom-agent/${id}`, { method: 'GET' }),
+            fetchClient<CustomAgent>(`/api/custom-agent/${id}`, { method: 'GET' }),
         update: (id: string | number, data: UpdateCustomAgentDto) =>
-            fetchClient<CustomAgent>(`/custom-agent/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+            fetchClient<CustomAgent>(`/api/custom-agent/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
         remove: (id: string | number) =>
-            fetchClient<void>(`/custom-agent/${id}`, { method: 'DELETE' }),
+            fetchClient<void>(`/api/custom-agent/${id}`, { method: 'DELETE' }),
         use: (data: FormData | any) => {
             const isForm = data instanceof FormData;
-            return fetchClient<any>('/custom-agent/use', {
+            return fetchClient<any>('/api/custom-agent/use', {
                 method: 'POST',
                 body: isForm ? data : JSON.stringify(data)
+            });
+        },
+        analyzeToPrompt: (data: FormData) => {
+            return fetchClient<any>('/api/custom-agent/analyze-to-prompt', {
+                method: 'POST',
+                body: data
             });
         }
     }

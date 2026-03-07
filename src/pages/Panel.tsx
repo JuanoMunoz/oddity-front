@@ -16,10 +16,14 @@ import {
     Calendar,
     Briefcase,
     Trash2,
-    Bot
+    Bot,
+    Paperclip
 } from 'lucide-react';
 import { oddityClient } from '../lib/oddityClient';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useDropzone } from 'react-dropzone';
+import * as XLSX from 'xlsx';
+import { Document, Page, Text, View, StyleSheet, PDFDownloadLink } from '@react-pdf/renderer';
 import Sidebar from '../components/Sidebar';
 import type { ViewId } from '../components/Sidebar';
 import Button from '../components/Button';
@@ -37,9 +41,10 @@ export const Panel: React.FC = () => {
         exit: { opacity: 0, y: -8, transition: { duration: 0.15 } }
     };
 
-    const inputClasses = "w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-sm py-3 px-4 outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 transition-all placeholder:text-slate-400 font-medium text-secondary dark:text-white text-sm";
-    const labelClasses = "text-[9px] font-black uppercase tracking-[0.2em] opacity-40 mb-2 block";
+    const inputClasses = "w-full bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-sm py-3 px-4 outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 transition-all placeholder:text-slate-400 dark:placeholder:text-slate-500 font-medium text-secondary dark:text-white text-sm";
+    const labelClasses = "text-[9px] font-black uppercase tracking-[0.2em] text-slate-400 dark:text-white/40 mb-2 block";
     const cardClasses = "bg-white dark:bg-white/3 border border-slate-200 dark:border-white/8 rounded-sm shadow-sm";
+    const { theme } = useApp();
 
     const renderContent = () => {
         if (typeof activeView === 'string' && activeView.startsWith('agent-')) {
@@ -85,10 +90,10 @@ export const Panel: React.FC = () => {
     };
 
     return (
-        <div className="flex h-[calc(100vh-3.5rem)] bg-transparent overflow-hidden">
+        <div className={cn("flex h-[calc(100vh-3.5rem)] overflow-hidden", theme === 'light' ? 'bg-slate-100' : 'bg-transparent')}>
             <Sidebar isCollapsed={isCollapsed} setIsCollapsed={setIsCollapsed} activeView={activeView} setActiveView={setActiveView} />
 
-            <main className="flex-1 overflow-y-auto p-8 surface-panel transition-all duration-300 custom-scrollbar">
+            <main className={cn("flex-1 overflow-y-auto p-8 transition-all duration-300 custom-scrollbar", theme === 'light' ? 'bg-slate-100' : 'surface-panel')}>
                 <AnimatePresence mode="wait">
                     {renderContent()}
                 </AnimatePresence>
@@ -368,13 +373,46 @@ function SuperAgentsView({ formVariants, cardClasses, inputClasses, labelClasses
     const { createCustomAgent, loading: createLoading, error, success, setError, setSuccess } = usePanelData();
     const [agents, setAgents] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
-    const [isAdding, setIsAdding] = useState(false);
+    const [isAdding, setIsAdding] = useState<boolean | number | string>(false);
 
     const [name, setName] = useState('');
     const [systemPrompt, setSystemPrompt] = useState('');
     const [organizationId, setOrganizationId] = useState('');
     const [mode, setMode] = useState<"CHAT" | "FILE" | "IMAGE" | "VIDEO">('CHAT');
     const [modelId, setModelId] = useState('');
+    const [expectedOutput, setExpectedOutput] = useState<"text" | "excel" | "pdf">('text');
+
+    const [isAnalyzingFile, setIsAnalyzingFile] = useState(false);
+
+    const handleAnalyzeFileForPrompt = async (acceptedFiles: File[]) => {
+        if (acceptedFiles.length === 0 || !modelId) {
+            setError("Selecciona un modelo primero para analizar el archivo");
+            return;
+        }
+        setIsAnalyzingFile(true);
+        setError(null);
+        try {
+            const formData = new FormData();
+            formData.append('files', acceptedFiles[0]);
+            formData.append('modelId', modelId.toString());
+            const res = await oddityClient.customAgent.analyzeToPrompt(formData);
+            const text = res.text || res.message || "";
+            if (text) {
+                setSystemPrompt(prev => prev + "\n\n[CONTEXTO_DOCUMENTO_ANALIZADO]:\n" + text);
+                setSuccess("Archivo analizado e integrado al System Prompt.");
+            }
+        } catch (e: any) {
+            setError("Error: " + e.message);
+        } finally {
+            setIsAnalyzingFile(false);
+        }
+    };
+
+    const dropzone = useDropzone({
+        onDrop: handleAnalyzeFileForPrompt,
+        multiple: false,
+        noClick: true
+    });
 
     const [organizations, setOrganizations] = useState<any[]>([]);
     const [models, setModels] = useState<any[]>([]);
@@ -398,9 +436,19 @@ function SuperAgentsView({ formVariants, cardClasses, inputClasses, labelClasses
 
     const handleSubmit = async () => {
         if (!name || !systemPrompt || !organizationId || !modelId) return;
-        const res = await createCustomAgent({
-            name, systemPrompt, organizationId: Number(organizationId), mode, modelId: Number(modelId), isActive: true
-        });
+
+        let res;
+        if (typeof isAdding === 'number') {
+            res = await oddityClient.customAgent.update(isAdding, {
+                name, systemPrompt, organizationId: Number(organizationId), mode, modelId: Number(modelId), expectedOutput
+            });
+            setSuccess("Agente actualizado");
+        } else {
+            res = await createCustomAgent({
+                name, systemPrompt, organizationId: Number(organizationId), mode, modelId: Number(modelId), isActive: true, expectedOutput
+            });
+        }
+
         if (res) {
             setIsAdding(false); fetchData(); setName(''); setSystemPrompt(''); setOrganizationId(''); setModelId('');
             window.dispatchEvent(new Event('oddity:agent-updated'));
@@ -424,11 +472,11 @@ function SuperAgentsView({ formVariants, cardClasses, inputClasses, labelClasses
                     <div>
                         <div className="flex items-center gap-3">
                             <div className="w-1 h-6 bg-primary" />
-                            <h2 className="text-2xl font-bold tracking-tight">Crear Agente Custom</h2>
+                            <h2 className="text-2xl font-bold tracking-tight">{typeof isAdding === 'number' ? 'Editar Agente' : 'Crear Agente Custom'}</h2>
                         </div>
                         <p className="text-sm opacity-40 ml-4 mt-1">Define un nuevo comportamiento de IA especializado.</p>
                     </div>
-                    <Button onClick={() => setIsAdding(false)} className="bg-slate-200 text-slate-800 dark:bg-white/10 dark:text-white hover:bg-slate-300 dark:hover:bg-white/20">
+                    <Button onClick={() => { setIsAdding(false); setName(''); setSystemPrompt(''); setOrganizationId(''); setModelId(''); }} className="bg-slate-200 text-slate-800 dark:bg-white/10 dark:text-white hover:bg-slate-300 dark:hover:bg-white/20">
                         Volver
                     </Button>
                 </header>
@@ -465,9 +513,58 @@ function SuperAgentsView({ formVariants, cardClasses, inputClasses, labelClasses
                                 {models.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
                             </select>
                         </div>
+                        <div className="space-y-2">
+                            <label className={labelClasses}>Salida Esperada</label>
+                            <select value={expectedOutput} onChange={e => setExpectedOutput(e.target.value as any)} className={selectClasses}>
+                                <option value="text">Texto</option>
+                                <option value="excel">Excel (.xlsx)</option>
+                                <option value="pdf">PDF (.pdf)</option>
+                            </select>
+                        </div>
                         <div className="md:col-span-2 space-y-2">
-                            <label className={labelClasses}>System Prompt</label>
-                            <textarea value={systemPrompt} onChange={e => setSystemPrompt(e.target.value)} rows={5} placeholder="Eres un asistente experto en..." className={cn(inputClasses, "resize-none leading-relaxed")} />
+                            <div className="flex items-center justify-between">
+                                <label className={labelClasses}>System Prompt</label>
+                                <div className="flex gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => dropzone.open()}
+                                        className="text-[9px] font-black uppercase tracking-[0.2em] text-primary flex items-center gap-1.5 hover:opacity-70 transition-all cursor-pointer bg-primary/5 px-2 py-1 rounded-sm border border-primary/10"
+                                    >
+                                        <Paperclip size={10} /> Añadir Clip
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div
+                                {...dropzone.getRootProps()}
+                                className={cn(
+                                    "relative group transition-all",
+                                    dropzone.isDragActive ? "ring-2 ring-primary ring-offset-2 rounded-sm" : ""
+                                )}
+                            >
+                                <input {...dropzone.getInputProps()} />
+                                <textarea
+                                    value={systemPrompt}
+                                    onChange={e => setSystemPrompt(e.target.value)}
+                                    rows={8}
+                                    placeholder="Instrucciones del agente... Tip: Suelta un archivo aquí para analizarlo y anexarlo al prompt."
+                                    className={cn(inputClasses, "resize-none leading-relaxed transition-colors", dropzone.isDragActive ? "bg-primary/5 border-primary" : "")}
+                                />
+                                {isAnalyzingFile && (
+                                    <div className="absolute inset-0 bg-white/50 dark:bg-black/50 backdrop-blur-[1px] flex flex-col items-center justify-center rounded-sm z-10 transition-all">
+                                        <Loader2 size={24} className="animate-spin text-primary mb-2" />
+                                        <span className="text-[10px] font-black uppercase tracking-widest text-primary">Analizando Documento...</span>
+                                    </div>
+                                )}
+                                {dropzone.isDragActive && !isAnalyzingFile && (
+                                    <div className="absolute inset-0 bg-primary/10 border-2 border-dashed border-primary flex items-center justify-center rounded-sm z-10 pointer-events-none">
+                                        <div className="flex flex-col items-center gap-2">
+                                            <Upload className="text-primary animate-bounce" />
+                                            <span className="text-xs font-bold text-primary uppercase tracking-tighter">Soltar para analizar anexar</span>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
                         </div>
                     </div>
                     <div className="pt-2 border-t border-slate-100 dark:border-white/5">
@@ -520,9 +617,26 @@ function SuperAgentsView({ formVariants, cardClasses, inputClasses, labelClasses
                                     <p className="font-bold text-sm">{a.name}</p>
                                     <p className="text-xs opacity-40">Org: {a.organizationId} | Mode: {a.mode || 'CHAT'}</p>
                                 </div>
-                                <button onClick={() => handleDelete(a.id)} className="p-2 text-red-500 hover:bg-red-500/10 transition-colors rounded-sm cursor-pointer">
-                                    <Trash2 size={16} />
-                                </button>
+                                <div className="flex items-center gap-1">
+                                    <button
+                                        onClick={async () => {
+                                            const details = await oddityClient.customAgent.findOne(a.id);
+                                            setName(details.name);
+                                            setSystemPrompt(details.systemPrompt);
+                                            setOrganizationId(details.organizationId.toString());
+                                            setMode(details.mode || 'CHAT');
+                                            setModelId(details.modelId?.toString() || '');
+                                            setExpectedOutput(details.expectedOutput || 'text');
+                                            setIsAdding(a.id);
+                                        }}
+                                        className="p-2 text-primary hover:bg-primary/10 transition-colors rounded-sm cursor-pointer"
+                                    >
+                                        <Pencil size={16} />
+                                    </button>
+                                    <button onClick={() => handleDelete(a.id)} className="p-2 text-red-500 hover:bg-red-500/10 transition-colors rounded-sm cursor-pointer">
+                                        <Trash2 size={16} />
+                                    </button>
+                                </div>
                             </div>
                         ))}
                     </div>
@@ -538,13 +652,14 @@ function OrgAgentsView({ formVariants, cardClasses, inputClasses, labelClasses }
     const [agents, setAgents] = useState<any[]>([]);
     const [models, setModels] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
-    const [isAdding, setIsAdding] = useState(false);
+    const [isAdding, setIsAdding] = useState<boolean | number | string>(false);
 
     const [name, setName] = useState('');
     const [systemPrompt, setSystemPrompt] = useState('');
     const [mode, setMode] = useState<"CHAT" | "FILE" | "IMAGE" | "VIDEO">('CHAT');
     const [modelId, setModelId] = useState('');
-
+    const [expectedOutput, setExpectedOutput] = useState<"text" | "excel" | "pdf">('text');
+    const [isAnalyzingFile, setIsAnalyzingFile] = useState(false);
     const selectClasses = cn(inputClasses, "dark:bg-[#0A0A0A] dark:text-white appearance-none");
 
     const fetchData = () => {
@@ -565,9 +680,19 @@ function OrgAgentsView({ formVariants, cardClasses, inputClasses, labelClasses }
 
     const handleSubmit = async () => {
         if (!name || !systemPrompt || !user?.organizationId || !modelId) return;
-        const res = await createCustomAgent({
-            name, systemPrompt, organizationId: Number(user.organizationId), mode, modelId: Number(modelId), isActive: true
-        });
+
+        let res;
+        if (typeof isAdding === 'number') {
+            res = await oddityClient.customAgent.update(isAdding, {
+                name, systemPrompt, organizationId: Number(user.organizationId), mode, modelId: Number(modelId), expectedOutput
+            });
+            setSuccess("Agente actualizado");
+        } else {
+            res = await createCustomAgent({
+                name, systemPrompt, organizationId: Number(user.organizationId), mode, modelId: Number(modelId), isActive: true, expectedOutput
+            });
+        }
+
         if (res) {
             setIsAdding(false); fetchData(); setName(''); setSystemPrompt(''); setModelId('');
             window.dispatchEvent(new Event('oddity:agent-updated'));
@@ -581,8 +706,40 @@ function OrgAgentsView({ formVariants, cardClasses, inputClasses, labelClasses }
             setAgents(prev => prev.filter(a => a.id !== id));
             setSuccess("Agente eliminado");
             window.dispatchEvent(new Event('oddity:agent-updated'));
-        } catch (e: any) { setError(e.message || "Error al eliminar"); }
+        } catch (e: any) {
+            setError(e.message || "Error al eliminar");
+        }
     };
+
+    const handleAnalyzeFileForPrompt = async (acceptedFiles: File[]) => {
+        if (acceptedFiles.length === 0 || !modelId) {
+            setError("Selecciona un modelo primero para analizar el archivo");
+            return;
+        }
+        setIsAnalyzingFile(true);
+        setError(null);
+        try {
+            const formData = new FormData();
+            formData.append('files', acceptedFiles[0]);
+            formData.append('modelId', modelId.toString());
+            const res = await oddityClient.customAgent.analyzeToPrompt(formData);
+            const text = res.text || res.message || "";
+            if (text) {
+                setSystemPrompt(prev => prev + "\n\n[CONTEXTO_DOCUMENTO_ANALIZADO]:\n" + text);
+                setSuccess("Archivo analizado e integrado al System Prompt.");
+            }
+        } catch (e: any) {
+            setError("Error: " + e.message);
+        } finally {
+            setIsAnalyzingFile(false);
+        }
+    };
+
+    const dropzone = useDropzone({
+        onDrop: handleAnalyzeFileForPrompt,
+        multiple: false,
+        noClick: true
+    });
 
     if (isAdding) {
         return (
@@ -591,11 +748,11 @@ function OrgAgentsView({ formVariants, cardClasses, inputClasses, labelClasses }
                     <div>
                         <div className="flex items-center gap-3">
                             <div className="w-1 h-6 bg-primary" />
-                            <h2 className="text-2xl font-bold tracking-tight">Crear Agente</h2>
+                            <h2 className="text-2xl font-bold tracking-tight">{typeof isAdding === 'number' ? 'Editar Agente' : 'Crear Agente'}</h2>
                         </div>
                         <p className="text-sm opacity-40 ml-4 mt-1">Define un nuevo comportamiento de IA para la organización.</p>
                     </div>
-                    <Button onClick={() => setIsAdding(false)} className="bg-slate-200 text-slate-800 dark:bg-white/10 dark:text-white hover:bg-slate-300 dark:hover:bg-white/20">
+                    <Button onClick={() => { setIsAdding(false); setName(''); setSystemPrompt(''); setModelId(''); }} className="bg-slate-200 text-slate-800 dark:bg-white/10 dark:text-white hover:bg-slate-300 dark:hover:bg-white/20">
                         Volver
                     </Button>
                 </header>
@@ -625,9 +782,47 @@ function OrgAgentsView({ formVariants, cardClasses, inputClasses, labelClasses }
                                 {models.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
                             </select>
                         </div>
+                        <div className="space-y-2">
+                            <label className={labelClasses}>Salida Esperada</label>
+                            <select value={expectedOutput} onChange={e => setExpectedOutput(e.target.value as any)} className={selectClasses}>
+                                <option value="text">Texto</option>
+                                <option value="excel">Excel (.xlsx)</option>
+                                <option value="pdf">PDF (.pdf)</option>
+                            </select>
+                        </div>
                         <div className="md:col-span-2 space-y-2">
-                            <label className={labelClasses}>System Prompt</label>
-                            <textarea value={systemPrompt} onChange={e => setSystemPrompt(e.target.value)} rows={5} placeholder="Instrucciones del agente..." className={cn(inputClasses, "resize-none leading-relaxed")} />
+                            <div className="flex items-center justify-between">
+                                <label className={labelClasses}>System Prompt</label>
+                                <button
+                                    type="button"
+                                    onClick={() => dropzone.open()}
+                                    className="text-[9px] font-black uppercase tracking-[0.2em] text-primary flex items-center gap-1.5 hover:opacity-70 transition-all cursor-pointer bg-primary/5 px-2 py-1 rounded-sm border border-primary/10"
+                                >
+                                    <Paperclip size={10} /> Añadir Clip
+                                </button>
+                            </div>
+                            <div
+                                {...dropzone.getRootProps()}
+                                className={cn(
+                                    "relative transition-all",
+                                    dropzone.isDragActive ? "ring-2 ring-primary ring-offset-2 rounded-sm" : ""
+                                )}
+                            >
+                                <input {...dropzone.getInputProps()} />
+                                <textarea
+                                    value={systemPrompt}
+                                    onChange={e => setSystemPrompt(e.target.value)}
+                                    rows={8}
+                                    placeholder="Instrucciones... Suelta archivos aquí para analizarlos."
+                                    className={cn(inputClasses, "resize-none leading-relaxed", dropzone.isDragActive ? "bg-primary/5 border-primary" : "")}
+                                />
+                                {isAnalyzingFile && (
+                                    <div className="absolute inset-0 bg-white/50 dark:bg-black/50 backdrop-blur-[1px] flex flex-col items-center justify-center rounded-sm z-10">
+                                        <Loader2 size={24} className="animate-spin text-primary mb-2" />
+                                        <span className="text-[10px] font-black text-primary uppercase tracking-widest">IA Procesando...</span>
+                                    </div>
+                                )}
+                            </div>
                         </div>
                     </div>
                     <div className="pt-2 border-t border-slate-100 dark:border-white/5">
@@ -685,9 +880,26 @@ function OrgAgentsView({ formVariants, cardClasses, inputClasses, labelClasses }
                                 <div className="text-xs font-bold opacity-60">
                                     {a.mode || 'CHAT'}
                                 </div>
-                                <button onClick={() => handleDelete(a.id)} className="p-2 text-red-500 hover:bg-red-500/10 transition-colors rounded-sm cursor-pointer">
-                                    <Trash2 size={16} />
-                                </button>
+                                <div className="flex items-center gap-1">
+                                    <button
+                                        onClick={async () => {
+                                            const details = await oddityClient.customAgent.findOne(a.id);
+                                            setName(details.name);
+                                            setSystemPrompt(details.systemPrompt);
+                                            setMode(details.mode || 'CHAT');
+                                            setModelId(details.modelId?.toString() || '');
+                                            setExpectedOutput(details.expectedOutput || 'text');
+                                            // @ts-ignore
+                                            setIsAdding(a.id);
+                                        }}
+                                        className="p-2 text-primary hover:bg-primary/10 transition-colors rounded-sm cursor-pointer"
+                                    >
+                                        <Pencil size={16} />
+                                    </button>
+                                    <button onClick={() => handleDelete(a.id)} className="p-2 text-red-500 hover:bg-red-500/10 transition-colors rounded-sm cursor-pointer">
+                                        <Trash2 size={16} />
+                                    </button>
+                                </div>
                             </div>
                         ))}
                     </div>
@@ -719,9 +931,19 @@ function SuperModelsView({ formVariants, cardClasses, inputClasses, labelClasses
 
     const handleSubmit = async () => {
         if (!name || !priceInput || !priceOutput) return;
-        const res = await createIaModel({
-            name, pricePerInputToken: Number(priceInput), pricePerOutputToken: Number(priceOutput), isActive: true
-        });
+
+        let res: any = null;
+        if (typeof isAdding === 'number') {
+            res = await oddityClient.iaModel.update(isAdding, {
+                name, pricePerInputToken: Number(priceInput), pricePerOutputToken: Number(priceOutput)
+            });
+            setSuccess("Modelo actualizado");
+        } else {
+            res = await createIaModel({
+                name, pricePerInputToken: Number(priceInput), pricePerOutputToken: Number(priceOutput), isActive: true
+            });
+        }
+
         if (res) { setIsAdding(false); fetchData(); setName(''); setPriceInput(''); setPriceOutput(''); }
     };
 
@@ -741,10 +963,10 @@ function SuperModelsView({ formVariants, cardClasses, inputClasses, labelClasses
                     <div>
                         <div className="flex items-center gap-3">
                             <div className="w-1 h-6 bg-primary" />
-                            <h2 className="text-2xl font-bold tracking-tight">Registrar Modelo IA</h2>
+                            <h2 className="text-2xl font-bold tracking-tight">{typeof isAdding === 'number' ? 'Editar Modelo IA' : 'Registrar Modelo IA'}</h2>
                         </div>
                     </div>
-                    <Button onClick={() => setIsAdding(false)} className="bg-slate-200 text-slate-800 dark:bg-white/10 dark:text-white hover:bg-slate-300 dark:hover:bg-white/20">Volver</Button>
+                    <Button onClick={() => { setIsAdding(false); setName(''); setPriceInput(''); setPriceOutput(''); }} className="bg-slate-200 text-slate-800 dark:bg-white/10 dark:text-white hover:bg-slate-300 dark:hover:bg-white/20">Volver</Button>
                 </header>
                 {error && <motion.div className="mb-4 p-3 bg-red-500/10 text-red-500 text-xs font-bold">{error}</motion.div>}
                 {success && <motion.div className="mb-4 p-3 bg-green-500/10 text-green-500 text-xs font-bold">{success}</motion.div>}
@@ -800,7 +1022,21 @@ function SuperModelsView({ formVariants, cardClasses, inputClasses, labelClasses
                                     <p className="font-bold text-sm">{m.name}</p>
                                     <p className="text-xs opacity-40">IP: ${m.pricePerInputToken} | OP: ${m.pricePerOutputToken}</p>
                                 </div>
-                                <button onClick={() => handleDelete(m.id)} className="p-2 text-red-500 hover:bg-red-500/10 transition-colors rounded-sm cursor-pointer"><Trash2 size={16} /></button>
+                                <div className="flex items-center gap-1">
+                                    <button
+                                        onClick={() => {
+                                            setName(m.name);
+                                            setPriceInput(m.pricePerInputToken.toString());
+                                            setPriceOutput(m.pricePerOutputToken.toString());
+                                            // @ts-ignore
+                                            setIsAdding(m.id);
+                                        }}
+                                        className="p-2 text-primary hover:bg-primary/10 transition-colors rounded-sm cursor-pointer"
+                                    >
+                                        <Pencil size={16} />
+                                    </button>
+                                    <button onClick={() => handleDelete(m.id)} className="p-2 text-red-500 hover:bg-red-500/10 transition-colors rounded-sm cursor-pointer"><Trash2 size={16} /></button>
+                                </div>
                             </div>
                         ))}
                     </div>
@@ -835,9 +1071,19 @@ function SuperOrgsView({ formVariants, cardClasses, inputClasses, labelClasses }
 
     const handleSubmit = async () => {
         if (!name || !slug || !billingEmail || !limit || !logo || !token) return;
-        const res = await createOrganization({
-            name, slug, billingEmail, monthlySpendingLimit: Number(limit), logo, accessToken: token, isActive: true, currentSpent: 0
-        });
+
+        let res: any = null;
+        if (typeof isAdding === 'number') {
+            res = await oddityClient.organization.update(isAdding, {
+                name, slug, billingEmail, monthlySpendingLimit: Number(limit), logo, accessToken: token
+            });
+            setSuccess("Organización actualizada");
+        } else {
+            res = await createOrganization({
+                name, slug, billingEmail, monthlySpendingLimit: Number(limit), logo, accessToken: token, isActive: true, currentSpent: 0
+            });
+        }
+
         if (res) { setIsAdding(false); fetchData(); setName(''); setSlug(''); setBillingEmail(''); setLimit(''); setLogo(''); setToken(''); }
     };
 
@@ -855,10 +1101,10 @@ function SuperOrgsView({ formVariants, cardClasses, inputClasses, labelClasses }
             <motion.div key="add-org" variants={formVariants} initial="hidden" animate="visible" exit="exit" className="max-w-3xl mx-auto">
                 <header className="mb-6 pb-5 border-b border-slate-100 dark:border-white/5 flex items-center justify-between">
                     <div>
-                        <div className="flex items-center gap-3"><div className="w-1 h-6 bg-primary" /><h2 className="text-2xl font-bold tracking-tight">Nueva Organización</h2></div>
-                        <p className="text-sm opacity-40 ml-4 mt-1">Configura una nueva empresa en el ecosistema Oddity.</p>
+                        <div className="flex items-center gap-3"><div className="w-1 h-6 bg-primary" /><h2 className="text-2xl font-bold tracking-tight">{typeof isAdding === 'number' ? 'Editar Organización' : 'Nueva Organización'}</h2></div>
+                        <p className="text-sm opacity-40 ml-4 mt-1">Configura una empresa en el ecosistema Oddity.</p>
                     </div>
-                    <Button onClick={() => setIsAdding(false)} className="bg-slate-200 text-slate-800 dark:bg-white/10 dark:text-white hover:bg-slate-300 dark:hover:bg-white/20">Volver</Button>
+                    <Button onClick={() => { setIsAdding(false); setName(''); setSlug(''); setBillingEmail(''); setLimit(''); setToken(''); setLogo(''); }} className="bg-slate-200 text-slate-800 dark:bg-white/10 dark:text-white hover:bg-slate-300 dark:hover:bg-white/20">Volver</Button>
                 </header>
                 {error && <motion.div className="mb-4 p-3 bg-red-500/10 text-red-500 text-xs font-bold">{error}</motion.div>}
                 {success && <motion.div className="mb-4 p-3 bg-green-500/10 text-green-500 text-xs font-bold">{success}</motion.div>}
@@ -921,7 +1167,26 @@ function SuperOrgsView({ formVariants, cardClasses, inputClasses, labelClasses }
                         {organizations.map(o => (
                             <div key={o.id} className="grid grid-cols-[1fr_auto] items-center gap-4 px-5 py-4 hover:bg-slate-50 dark:hover:bg-white/2 transition-colors">
                                 <div><p className="font-bold text-sm">{o.name}</p><p className="text-xs opacity-40">{o.billingEmail}</p></div>
-                                <button onClick={() => handleDelete(o.id)} className="p-2 text-red-500 hover:bg-red-500/10 transition-colors rounded-sm cursor-pointer"><Trash2 size={16} /></button>
+                                <div className="flex items-center gap-1">
+                                    <button
+                                        onClick={() => {
+                                            setName(o.name);
+                                            setSlug(o.slug);
+                                            setBillingEmail(o.billingEmail);
+                                            setLimit(o.monthlySpendingLimit.toString());
+                                            setLogo(o.logo);
+                                            setToken(o.accessToken);
+                                            // @ts-ignore
+                                            setIsAdding(o.id);
+                                        }}
+                                        className="p-2 text-primary hover:bg-primary/10 transition-colors rounded-sm cursor-pointer"
+                                    >
+                                        <Pencil size={16} />
+                                    </button>
+                                    <button onClick={() => handleDelete(o.id)} className="p-2 text-red-500 hover:bg-red-500/10 transition-colors rounded-sm cursor-pointer">
+                                        <Trash2 size={16} />
+                                    </button>
+                                </div>
                             </div>
                         ))}
                     </div>
@@ -937,11 +1202,8 @@ function AgentChatView({ agentId, formVariants, inputClasses, cardClasses }: any
 
     useEffect(() => {
         setLoading(true);
-        oddityClient.customAgent.findAll()
-            .then(res => {
-                const found = res.find((a: any) => a.id === Number(agentId));
-                setAgent(found);
-            })
+        oddityClient.customAgent.findOne(Number(agentId))
+            .then(res => { setAgent(res); })
             .catch(console.error)
             .finally(() => setLoading(false));
     }, [agentId]);
@@ -957,39 +1219,138 @@ function AgentChatView({ agentId, formVariants, inputClasses, cardClasses }: any
 }
 
 function AgentChatInterface({ agent, formVariants, inputClasses, cardClasses }: any) {
-    const [messages, setMessages] = useState<Array<{ role: string, content: string }>>([]);
+    const [messages, setMessages] = useState<Array<{ role: string, content: string, files?: string[] }>>([]);
     const [input, setInput] = useState('');
+    const [files, setFiles] = useState<File[]>([]);
     const [sending, setSending] = useState(false);
-    const messagesEndRef = useRef<HTMLDivElement>(null);
+    const messagesEndRef = useRef<any>(null);
+
+    const onDrop = (acceptedFiles: File[]) => {
+        setFiles(prev => [...prev, ...acceptedFiles]);
+    };
+
+    const { getRootProps, getInputProps, isDragActive } = useDropzone({
+        onDrop,
+        multiple: true
+    });
 
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [messages]);
 
     const handleSend = async () => {
-        if (!input.trim() || sending) return;
+        if ((!input.trim() && files.length === 0) || sending) return;
         const userMsg = input;
+        const currentFiles = [...files];
 
-        const newHistory = [...messages, { role: 'user', content: userMsg }];
-        setMessages(newHistory);
+        setMessages(prev => [...prev, {
+            role: 'user',
+            content: userMsg,
+            files: currentFiles.map(f => f.name)
+        }]);
+
         setInput('');
+        setFiles([]);
         setSending(true);
 
         try {
-            const historyDto = messages.map(m => ({ role: m.role, text: m.content }));
+            const historyDto = messages.map(m => ({
+                role: m.role === 'ai' ? 'model' : m.role,
+                text: m.content
+            }));
 
-            const res = await oddityClient.customAgent.use({
-                customAgentId: agent.id,
-                history: historyDto,
-                prompt: userMsg
-            });
+            let res;
+            if (currentFiles.length > 0) {
+                const formData = new FormData();
+                currentFiles.forEach(f => formData.append('files', f));
+                formData.append('customAgentId', agent.id.toString());
+                formData.append('prompt', userMsg);
+                formData.append('history', JSON.stringify(historyDto));
+                res = await oddityClient.customAgent.use(formData);
+            } else {
+                res = await oddityClient.customAgent.use({
+                    customAgentId: agent.id,
+                    history: historyDto,
+                    prompt: userMsg
+                });
+            }
 
             const aiResponse = res.text || res.message || (typeof res === 'string' ? res : JSON.stringify(res));
-            setMessages(prev => [...prev, { role: 'user', content: aiResponse }]);
+            setMessages(prev => [...prev, { role: 'ai', content: aiResponse }]);
+
+            // Handle expected output if provided
+            if (res.expectedOutput && res.expectedOutput !== 'text') {
+                handleAutoDownload(aiResponse, res.expectedOutput, agent.name);
+            }
+
         } catch (e: any) {
-            setMessages(prev => [...prev, { role: 'model', content: `Error: ${e.message}` }]);
+            setMessages(prev => [...prev, { role: 'system', content: `Error: ${e.message}` }]);
         } finally {
             setSending(false);
+        }
+    };
+
+    const handleAutoDownload = async (content: string, type: string, agentName: string) => {
+        const filename = `${agentName.replace(/\s+/g, '_')}_${new Date().getTime()}`;
+        if (type === 'excel') {
+            try {
+                const cleanContent = content.replace(/```(?:csv|text)?\n?([\s\S]*?)\n?```/g, '$1').trim();
+
+                // Optimized parsing for large CSV strings
+                const rows = cleanContent.split('\n').filter(l => l.trim());
+                if (rows.length === 0) return;
+
+                const aoa: any[][] = rows.map(row => row.split(';'));
+
+                const MAX_CHARS = 32000;
+                const processedAOA: any[][] = [];
+
+                aoa.forEach(row => {
+                    let maxSplits = 1;
+                    row.forEach(cell => {
+                        if (typeof cell === 'string') {
+                            maxSplits = Math.max(maxSplits, Math.ceil(cell.length / MAX_CHARS));
+                        }
+                    });
+
+                    if (maxSplits <= 1) {
+                        processedAOA.push(row);
+                    } else {
+                        for (let i = 0; i < maxSplits; i++) {
+                            const subRow = row.map(cell => {
+                                if (typeof cell !== 'string') return i === 0 ? cell : '';
+                                return cell.substring(i * MAX_CHARS, (i + 1) * MAX_CHARS);
+                            });
+                            processedAOA.push(subRow);
+                        }
+                    }
+                });
+
+                const ws = XLSX.utils.aoa_to_sheet(processedAOA);
+                const wb = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(wb, ws, "Result");
+                XLSX.writeFile(wb, `${filename}.xlsx`);
+            } catch (e) {
+                console.error('Failed to parse CSV for Excel auto-download:', e);
+                const element = document.createElement("a");
+                const file = new Blob([content], { type: 'text/csv' });
+                element.href = URL.createObjectURL(file);
+                element.download = `${filename}.csv`;
+                document.body.appendChild(element);
+                element.click();
+            }
+        } else if (type === 'pdf') {
+            try {
+                const { pdf } = await import('@react-pdf/renderer');
+                const blob = await pdf(<ResultPDF content={content} title={agentName} />).toBlob();
+                const element = document.createElement("a");
+                element.href = URL.createObjectURL(blob);
+                element.download = `${filename}.pdf`;
+                document.body.appendChild(element);
+                element.click();
+            } catch (e) {
+                console.error('Failed to generate PDF:', e);
+            }
         }
     };
 
@@ -1010,13 +1371,49 @@ function AgentChatInterface({ agent, formVariants, inputClasses, cardClasses }: 
                         </div>
                     ) : (
                         messages.map((msg, i) => (
-                            <div key={i} className={cn("flex w-full", msg.role === 'user' ? "justify-end" : "justify-start")}>
-                                <div className={cn("max-w-[80%] rounded-sm p-4 text-sm leading-relaxed",
+                            <div key={i} className={cn("flex w-full gap-3", msg.role === 'user' ? "flex-row-reverse" : "flex-row")}>
+                                <div className={cn(
+                                    "w-8 h-8 rounded-full flex items-center justify-center shrink-0 border",
+                                    msg.role === 'user' ? "bg-primary/10 border-primary/20 text-primary" : "bg-white dark:bg-white/5 border-slate-200 dark:border-white/10 text-secondary dark:text-white"
+                                )}>
+                                    {msg.role === 'user' ? <User size={14} /> : <Bot size={14} />}
+                                </div>
+                                <div className={cn("max-w-[80%] rounded-sm p-4 text-sm leading-relaxed shadow-sm",
                                     msg.role === 'user' ? "bg-primary text-white" :
-                                        msg.role === 'model' || msg.role === 'ai' ? "bg-primary/10 text-primary border border-primary/20" :
-                                            msg.role === 'system' ? "bg-red-500/10 text-red-500" : "bg-slate-100 dark:bg-white/5")}>
-                                    {(msg.role === 'model' || msg.role === 'ai') && <div className="font-bold text-xs opacity-50 mb-1">{agent.name}</div>}
-                                    {msg.content}
+                                        msg.role === 'ai' ? "bg-white dark:bg-white/5 text-secondary dark:text-white border border-slate-100 dark:border-white/5" :
+                                            msg.role === 'system' ? "bg-red-500/10 text-red-500 border border-red-500/20" : "bg-slate-100 dark:bg-white/5")}>
+                                    <div className="flex items-center gap-2 mb-1">
+                                        <span className="text-[10px] font-black uppercase tracking-widest opacity-40">
+                                            {msg.role === 'user' ? 'Tú' : agent.name}
+                                        </span>
+                                    </div>
+
+                                    {msg.content.length > 2000 && (msg.content.includes(';') || msg.content.includes(',')) ? (
+                                        <div className="p-3 bg-green-500/10 border border-green-500/20 rounded flex flex-col gap-2">
+                                            <p className="text-xs font-bold text-green-600 dark:text-green-400 flex items-center gap-1">
+                                                <FileSpreadsheet size={14} /> Datos generados ({msg.content.split('\n').length} filas)
+                                            </p>
+                                            <p className="text-[10px] opacity-60">El contenido es extenso y se ha descargado automáticamente como Excel para tu comodidad.</p>
+                                            <button
+                                                onClick={() => handleAutoDownload(msg.content, 'excel', agent.name)}
+                                                className="text-[10px] uppercase font-black tracking-widest text-primary hover:underline self-start"
+                                            >
+                                                Volver a descargar
+                                            </button>
+                                        </div>
+                                    ) : (
+                                        <div className="whitespace-pre-wrap">{msg.content}</div>
+                                    )}
+
+                                    {msg.files && msg.files.length > 0 && (
+                                        <div className="mt-3 pt-3 border-t border-current/10 flex flex-wrap gap-2 text-[10px] opacity-70">
+                                            {msg.files.map((fn, idx) => (
+                                                <span key={idx} className="bg-current/10 px-1.5 py-0.5 rounded flex items-center gap-1">
+                                                    <Upload size={10} /> {fn}
+                                                </span>
+                                            ))}
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         ))
@@ -1025,17 +1422,41 @@ function AgentChatInterface({ agent, formVariants, inputClasses, cardClasses }: 
                 </div>
 
                 <div className="p-4 border-t border-slate-100 dark:border-white/5 bg-slate-50 dark:bg-white/2">
+                    {files.length > 0 && (
+                        <div className="mb-3 flex flex-wrap gap-2">
+                            {files.map((f, i) => (
+                                <div key={i} className="flex items-center gap-2 bg-primary/10 text-primary text-[10px] font-bold px-2 py-1 rounded border border-primary/20">
+                                    <span className="max-w-[100px] truncate">{f.name}</span>
+                                    <button onClick={() => setFiles(prev => prev.filter((_, idx) => idx !== i))} className="hover:text-red-500 transition-colors">
+                                        <X size={10} />
+                                    </button>
+                                </div>
+                            ))}
+                            <span className="text-[10px] opacity-40 self-center ml-1">{files.length} archivo(s) seleccionado(s)</span>
+                        </div>
+                    )}
                     <div className="flex gap-3">
+                        <div {...getRootProps()} className={cn("p-2 border border-slate-200 dark:border-white/10 hover:border-primary/50 transition-colors flex items-center justify-center cursor-pointer rounded-sm bg-white dark:bg-white/5", isDragActive && "border-primary")}>
+                            <input {...getInputProps()} />
+                            <div className="relative">
+                                <Paperclip size={20} className={cn("transition-all", files.length > 0 ? "text-primary opacity-100" : "opacity-40")} />
+                                {files.length > 0 && (
+                                    <span className="absolute -top-1 -right-1 w-3 h-3 bg-primary text-[8px] flex items-center justify-center text-white rounded-full font-black">
+                                        {files.length}
+                                    </span>
+                                )}
+                            </div>
+                        </div>
                         <input
                             type="text"
                             value={input}
                             onChange={e => setInput(e.target.value)}
                             onKeyDown={e => e.key === 'Enter' && handleSend()}
                             disabled={sending}
-                            placeholder="Escribe un mensaje..."
-                            className={cn(inputClasses, "flex-1 border-transparent focus:border-transparent")}
+                            placeholder="Escribe un mensaje o suelta archivos aquí..."
+                            className={cn(inputClasses, "flex-1 border-transparent focus:border-transparent cursor-text text-black dark:text-white")}
                         />
-                        <button onClick={handleSend} disabled={sending || !input.trim()} className="px-6 py-2 bg-primary text-white font-bold rounded-sm uppercase tracking-wider text-xs flex items-center gap-2 hover:bg-primary/90 transition-all cursor-pointer disabled:opacity-50">
+                        <button onClick={handleSend} disabled={sending || (!input.trim() && files.length === 0)} className="px-6 py-2 bg-primary text-white font-bold rounded-sm uppercase tracking-wider text-xs flex items-center gap-2 hover:bg-primary/90 transition-all cursor-pointer disabled:opacity-50">
                             {sending ? <Loader2 size={14} className="animate-spin" /> : 'Enviar'} <ArrowRight size={14} />
                         </button>
                     </div>
@@ -1045,47 +1466,243 @@ function AgentChatInterface({ agent, formVariants, inputClasses, cardClasses }: 
     );
 }
 
+const pdfStyles = StyleSheet.create({
+    page: { padding: 50, backgroundColor: '#ffffff', fontFamily: 'Helvetica' },
+    section: { marginBottom: 15 },
+    title: { fontSize: 28, marginBottom: 25, fontWeight: 'bold', color: '#000', borderBottomWidth: 1, borderBottomColor: '#eee', paddingBottom: 10 },
+    h1: { fontSize: 20, marginBottom: 12, marginTop: 15, fontWeight: 'bold', color: '#111' },
+    h2: { fontSize: 16, marginBottom: 10, marginTop: 12, fontWeight: 'bold', color: '#222' },
+    h3: { fontSize: 14, marginBottom: 8, marginTop: 10, fontWeight: 'bold', color: '#333' },
+    paragraph: { fontSize: 11, lineHeight: 1.6, color: '#444', marginBottom: 10 },
+    bold: { fontWeight: 'bold', color: '#000' },
+    italic: { fontStyle: 'italic' },
+    listItem: { marginLeft: 15, marginBottom: 5, flexDirection: 'row' },
+    bullet: { width: 10, fontSize: 11 },
+    listText: { flex: 1, fontSize: 11, lineHeight: 1.6, color: '#444' },
+    codeBlock: { backgroundColor: '#f5f5f5', padding: 10, borderRadius: 3, marginVertical: 10, fontFamily: 'Courier' },
+    codeText: { fontSize: 10, color: '#d63384' }
+});
+
+const ResultPDF = ({ content, title }: any) => {
+    const parseMarkdown = (text: string) => {
+        const lines = text.split('\n');
+        const elements: any[] = [];
+        let currentList: any[] = [];
+
+        const flushList = () => {
+            if (currentList.length > 0) {
+                elements.push(
+                    <View key={`list-${elements.length}`} style={{ marginBottom: 10 }}>
+                        {currentList}
+                    </View>
+                );
+                currentList = [];
+            }
+        };
+
+        const parseInline = (line: string, keyPrefix: string) => {
+            const parts: any[] = [];
+            let lastIndex = 0;
+
+            // Bold (**text**) and Italic (*text*)
+            const combinedRegex = /(\*\*|__)(.*?)\1|(\*|_)(.*?)\3/g;
+            let match;
+
+            while ((match = combinedRegex.exec(line)) !== null) {
+                // Add text before match
+                if (match.index > lastIndex) {
+                    parts.push(line.substring(lastIndex, match.index));
+                }
+
+                if (match[1]) { // Bold
+                    parts.push(<Text key={`${keyPrefix}-b-${match.index}`} style={pdfStyles.bold}>{match[2]}</Text>);
+                } else if (match[3]) { // Italic
+                    parts.push(<Text key={`${keyPrefix}-i-${match.index}`} style={pdfStyles.italic}>{match[4]}</Text>);
+                }
+
+                lastIndex = combinedRegex.lastIndex;
+            }
+
+            if (lastIndex < line.length) {
+                parts.push(line.substring(lastIndex));
+            }
+
+            return parts.length > 0 ? parts : line;
+        };
+
+        let inCodeBlock = false;
+        let codeContent = '';
+
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i].trim();
+
+            // Code Blocks
+            if (line.startsWith('```')) {
+                if (inCodeBlock) {
+                    elements.push(
+                        <View key={`code-${i}`} style={pdfStyles.codeBlock}>
+                            <Text style={pdfStyles.codeText}>{codeContent.trim()}</Text>
+                        </View>
+                    );
+                    codeContent = '';
+                    inCodeBlock = false;
+                } else {
+                    inCodeBlock = true;
+                }
+                continue;
+            }
+
+            if (inCodeBlock) {
+                codeContent += lines[i] + '\n';
+                continue;
+            }
+
+            // Headers
+            if (line.startsWith('# ')) {
+                flushList();
+                elements.push(<Text key={i} style={pdfStyles.h1}>{line.substring(2)}</Text>);
+            } else if (line.startsWith('## ')) {
+                flushList();
+                elements.push(<Text key={i} style={pdfStyles.h2}>{line.substring(3)}</Text>);
+            } else if (line.startsWith('### ')) {
+                flushList();
+                elements.push(<Text key={i} style={pdfStyles.h3}>{line.substring(4)}</Text>);
+            }
+            // Lists
+            else if (line.startsWith('- ') || line.startsWith('* ') || /^\d+\.\s/.test(line)) {
+                const bullet = line.startsWith('- ') || line.startsWith('* ') ? '•' : line.split('.')[0] + '.';
+                const contentText = line.replace(/^[-*] |\d+\.\s/, '');
+                currentList.push(
+                    <View key={`li-${i}`} style={pdfStyles.listItem}>
+                        <Text style={pdfStyles.bullet}>{bullet}</Text>
+                        <Text style={pdfStyles.listText}>{parseInline(contentText, `li-inner-${i}`)}</Text>
+                    </View>
+                );
+            }
+            // Paragraphs or empty lines
+            else if (line === '') {
+                flushList();
+            } else {
+                flushList();
+                elements.push(<Text key={i} style={pdfStyles.paragraph}>{parseInline(line, `p-${i}`)}</Text>);
+            }
+        }
+        flushList();
+        return elements;
+    };
+
+    return (
+        <Document>
+            <Page size="A4" style={pdfStyles.page}>
+                <View style={pdfStyles.section}>
+                    <Text style={pdfStyles.title}>{title}</Text>
+                    {parseMarkdown(content)}
+                </View>
+            </Page>
+        </Document>
+    );
+};
+
 function AgentDocumentInterface({ agent, formVariants, inputClasses, cardClasses }: any) {
-    const [selectedFile, setSelectedFile] = useState<File | null>(null);
+    const [files, setFiles] = useState<File[]>([]);
     const [prompt, setPrompt] = useState('');
     const [sending, setSending] = useState(false);
-    const [result, setResult] = useState<string | null>(null);
-    const fileInputRef = useRef<HTMLInputElement>(null);
+    const [result, setResult] = useState<{ text: string, type: string } | null>(null);
 
-    const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
-        if (file) setSelectedFile(file);
+    const onDrop = (acceptedFiles: File[]) => {
+        setFiles(prev => [...prev, ...acceptedFiles]);
     };
 
-    const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
-        e.preventDefault();
-        const file = e.dataTransfer.files?.[0];
-        if (file) setSelectedFile(file);
-    };
-
-    const triggerFileUpload = () => fileInputRef.current?.click();
+    const { getRootProps, getInputProps, isDragActive } = useDropzone({
+        onDrop,
+        multiple: true
+    });
 
     const handleSend = async () => {
-        if (!selectedFile || sending) return;
+        if (files.length === 0 || sending) return;
         setSending(true);
         setResult(null);
 
         const formData = new FormData();
-        formData.append('file', selectedFile);
+        files.forEach(f => formData.append('files', f));
         formData.append('customAgentId', agent.id.toString());
         if (prompt) formData.append('prompt', prompt);
-
-        // Dummy history as json string
         formData.append('history', JSON.stringify([]));
 
         try {
             const res = await oddityClient.customAgent.use(formData);
             const aiResponse = res.text || res.message || (typeof res === 'string' ? res : JSON.stringify(res));
-            setResult(aiResponse);
+            // Use server's expectedOutput; fallback to agent's configured expectedOutput
+            const outputType = res.expectedOutput || agent.expectedOutput || 'text';
+
+            setResult({ text: aiResponse, type: outputType });
+
+            // AUTO DOWNLOAD for large files or excel mode
+            if (outputType === 'excel') {
+                setTimeout(() => downloadExcel(aiResponse), 100);
+            }
         } catch (e: any) {
-            setResult(`Error: ${e.message}`);
+            setResult({ text: `Error: ${e.message}`, type: 'text' });
         } finally {
             setSending(false);
+        }
+    };
+
+    const downloadTxt = () => {
+        const element = document.createElement("a");
+        const file = new Blob([result?.text || ''], { type: 'text/plain' });
+        element.href = URL.createObjectURL(file);
+        element.download = `${agent.name}_result.txt`;
+        document.body.appendChild(element);
+        element.click();
+    };
+
+    const downloadExcel = (contentOverride?: string) => {
+        const content = contentOverride || result?.text || '';
+        const filename = `${agent.name.replace(/\s+/g, '_')}_result`;
+        try {
+            const cleanContent = content.replace(/```(?:csv|text)?\n?([\s\S]*?)\n?```/g, '$1').trim();
+
+            const rows = cleanContent.split('\n').filter(l => l.trim());
+            const aoa: any[][] = rows.map(row => row.split(';'));
+
+            const MAX_CHARS = 32000;
+            const processedAOA: any[][] = [];
+
+            aoa.forEach(row => {
+                let maxSplits = 1;
+                row.forEach(cell => {
+                    if (typeof cell === 'string') {
+                        maxSplits = Math.max(maxSplits, Math.ceil(cell.length / MAX_CHARS));
+                    }
+                });
+
+                if (maxSplits <= 1) {
+                    processedAOA.push(row);
+                } else {
+                    for (let i = 0; i < maxSplits; i++) {
+                        const subRow = row.map(cell => {
+                            if (typeof cell !== 'string') return i === 0 ? cell : '';
+                            return cell.substring(i * MAX_CHARS, (i + 1) * MAX_CHARS);
+                        });
+                        processedAOA.push(subRow);
+                    }
+                }
+            });
+
+            const ws = XLSX.utils.aoa_to_sheet(processedAOA);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, "Result");
+            XLSX.writeFile(wb, `${filename}.xlsx`);
+        } catch (e) {
+            console.error('Failed to parse CSV for Excel download:', e);
+            const element = document.createElement("a");
+            const file = new Blob([content], { type: 'text/csv' });
+            element.href = URL.createObjectURL(file);
+            element.download = `${filename}.csv`;
+            document.body.appendChild(element);
+            element.click();
+            alert("Error al generar el Excel. Se descargó como CSV.");
         }
     };
 
@@ -1097,65 +1714,103 @@ function AgentDocumentInterface({ agent, formVariants, inputClasses, cardClasses
                 <span className="ml-auto text-[9px] font-black px-2 py-1 bg-red-500/10 text-red-500 border border-red-500/20 uppercase tracking-widest">FILE MODE</span>
             </header>
 
-            <div className={cn(cardClasses, "flex-1 flex flex-col items-center justify-center p-8 text-center overflow-y-auto w-full max-w-4xl mx-auto")}>
+            <div className={cn(cardClasses, "flex-1 flex flex-col p-8 overflow-y-auto")}>
                 {result ? (
                     <div className="w-full flex-1 flex flex-col items-start text-left space-y-4">
-                        <div className="flex justify-between items-center w-full">
-                            <h3 className="font-bold text-lg">Resultado del Análisis</h3>
-                            <Button onClick={() => { setResult(null); setSelectedFile(null); setPrompt(''); }} variant="outline" size="sm">Cargar otro archivo</Button>
-                        </div>
-                        <div className="p-6 bg-slate-50 dark:bg-[#0E0E0E] border border-slate-200 dark:border-white/10 text-sm w-full whitespace-pre-wrap leading-relaxed shadow-sm rounded-sm">
-                            <div className="font-bold text-primary mb-2 flex items-center gap-2">
-                                <Bot size={16} /> Respuesta de IA
+                        <div className="flex justify-between items-center w-full pb-4 border-b border-slate-100 dark:border-white/5">
+                            <h3 className="font-bold text-lg flex items-center gap-2"><Bot className="text-primary" /> Resultado del Análisis</h3>
+                            <div className="flex gap-2">
+                                {result.type === 'pdf' && (
+                                    <PDFDownloadLink document={<ResultPDF content={result.text} title={agent.name} />} fileName={`${agent.name}_result.pdf`}>
+                                        {({ loading }) => (
+                                            <Button variant="outline" size="sm" className="bg-red-500/5 text-red-500 border-red-500/20">
+                                                {loading ? 'Preparando...' : 'Descargar PDF'}
+                                            </Button>
+                                        )}
+                                    </PDFDownloadLink>
+                                )}
+                                {result.type === 'excel' && (
+                                    <Button onClick={() => downloadExcel()} variant="outline" size="sm" className="bg-green-500/5 text-green-600 border-green-500/20">
+                                        Descargar Excel
+                                    </Button>
+                                )}
+                                <Button onClick={downloadTxt} variant="outline" size="sm">Descargar TXT</Button>
+                                <Button onClick={() => { setResult(null); setFiles([]); setPrompt(''); }} className="bg-primary text-white">Nuevo Análisis</Button>
                             </div>
-                            {result}
+                        </div>
+                        <div className="p-6 bg-slate-50 dark:bg-[#080808] border border-slate-200 dark:border-white/5 text-sm w-full whitespace-pre-wrap leading-relaxed shadow-sm rounded-sm font-medium opacity-90 overflow-x-auto">
+                            {result.type === 'excel' ? (
+                                <div className="flex flex-col items-center py-10 gap-4">
+                                    <div className="w-16 h-16 bg-green-500/10 text-green-500 rounded-full flex items-center justify-center">
+                                        <FileSpreadsheet size={32} />
+                                    </div>
+                                    <div className="text-center">
+                                        <p className="font-bold text-base">Excel Generado Correctamente</p>
+                                        <p className="text-xs opacity-50 mt-1">El archivo se ha descargado automáticamente. Contiene {result.text.split('\n').length} filas procesadas.</p>
+                                    </div>
+                                    <Button onClick={() => downloadExcel()} className="bg-green-600 hover:bg-green-700 text-white gap-2">
+                                        <Upload size={14} className="rotate-180" /> Descargar de Nuevo
+                                    </Button>
+                                </div>
+                            ) : (
+                                result.text
+                            )}
                         </div>
                     </div>
                 ) : (
-                    <>
+                    <div className="w-full h-full flex flex-col">
                         <div
-                            onDragOver={e => e.preventDefault()}
-                            onDrop={handleDrop}
-                            onClick={triggerFileUpload}
-                            className="w-full max-w-xl mx-auto flex flex-col items-center justify-center border-2 border-dashed border-slate-300 dark:border-white/10 hover:border-slate-400 dark:hover:border-white/20 bg-slate-50 dark:bg-white/2 p-12 text-center transition-all cursor-pointer rounded-sm"
+                            {...getRootProps()}
+                            className={cn("flex-1 min-h-[300px] flex flex-col items-center justify-center border-2 border-dashed transition-all cursor-pointer rounded-sm p-8",
+                                isDragActive ? "border-primary bg-primary/5 shadow-inner" : "border-slate-300 dark:border-white/10 bg-slate-50 dark:bg-white/2 hover:border-slate-400 dark:hover:border-white/20")}
                         >
-                            <div className="w-16 h-16 bg-red-500/10 flex items-center justify-center mb-6 text-red-500 rounded-full">
-                                <FileSpreadsheet size={32} />
+                            <input {...getInputProps()} />
+                            <div className="w-20 h-20 bg-red-500/10 flex items-center justify-center mb-6 text-red-500 rounded-full shadow-sm">
+                                <FileSpreadsheet size={40} />
                             </div>
 
-                            <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" />
-
-                            <h3 className="text-xl font-bold mb-2">Cargar Documento</h3>
-                            <p className="opacity-40 text-sm max-w-sm">
-                                Arrastra tu archivo o haz clic para seleccionarlo.
+                            <h3 className="text-2xl font-black mb-2">Cargar Documentos</h3>
+                            <p className="opacity-40 text-sm max-w-sm mb-6">
+                                Arrastra tus archivos o haz clic para seleccionarlos. Admite múltiples archivos (PDF, CSV, XLSX, TXT).
                             </p>
+
+                            {files.length > 0 && (
+                                <div className="w-full max-w-md space-y-2 mb-4">
+                                    <p className="text-[10px] font-black uppercase tracking-widest opacity-40 text-left w-full pl-1">Archivos seleccionados ({files.length})</p>
+                                    <div className="max-h-32 overflow-y-auto custom-scrollbar border border-slate-100 dark:border-white/5 rounded p-2 bg-white/5">
+                                        {files.map((file, i) => (
+                                            <div key={i} className="flex items-center gap-3 text-xs font-bold py-1.5 px-3 border-b last:border-0 border-slate-100 dark:border-white/5">
+                                                <Upload size={14} className="opacity-30" />
+                                                <span className="truncate flex-1 text-left">{file.name}</span>
+                                                <span className="opacity-30 text-[9px]">{(file.size / 1024).toFixed(0)} KB</span>
+                                                <button onClick={(e) => { e.stopPropagation(); setFiles(prev => prev.filter((_, idx) => idx !== i)); }} className="text-red-500 p-1 hover:bg-red-500/10 rounded">
+                                                    <X size={14} />
+                                                </button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
                         </div>
 
-                        {selectedFile && (
-                            <div className="mt-6 flex items-center gap-3 bg-green-500/10 text-green-600 dark:text-green-400 px-4 py-2.5 border border-green-500/20 text-sm font-bold w-full max-w-xl rounded-sm">
-                                <div className="w-2 h-2 bg-green-500 animate-pulse rounded-full" />
-                                <span className="truncate flex-1 text-left">{selectedFile.name}</span>
-                                <button onClick={(e) => { e.stopPropagation(); setSelectedFile(null); }} className="opacity-60 hover:opacity-100 cursor-pointer p-1">
-                                    <X size={16} />
-                                </button>
+                        <div className="w-full mt-8 flex flex-col gap-4">
+                            <div className="space-y-1">
+                                <label className="text-[9px] font-black uppercase tracking-[0.2em] opacity-40 block pl-1">Instrucciones de Análisis</label>
+                                <textarea
+                                    value={prompt}
+                                    onChange={e => setPrompt(e.target.value)}
+                                    rows={3}
+                                    placeholder="Instrucciones adicionales para analizar los archivos..."
+                                    className={cn(inputClasses, "resize-none leading-relaxed")}
+                                />
                             </div>
-                        )}
 
-                        <div className="w-full max-w-xl mt-6 space-y-4">
-                            <input
-                                type="text"
-                                value={prompt}
-                                onChange={e => setPrompt(e.target.value)}
-                                placeholder="Instrucciones adicionales para analizar el archivo (opcional)..."
-                                className={inputClasses}
-                            />
-
-                            <Button onClick={handleSend} disabled={!selectedFile || sending} className="w-full py-3 bg-primary text-white font-bold text-sm uppercase tracking-wider flex items-center justify-center gap-2">
-                                {sending ? <Loader2 className="animate-spin w-4 h-4" /> : <Upload className="w-4 h-4" />}
-                                {sending ? 'Analizando...' : 'Subir y Analizar'}
+                            <Button onClick={handleSend} disabled={files.length === 0 || sending} className="w-full py-4 bg-primary text-white font-black text-xs uppercase tracking-[0.2em] flex items-center justify-center gap-3 shadow-lg shadow-primary/20 hover:shadow-primary/40 transition-all">
+                                {sending ? <Loader2 className="animate-spin w-5 h-5" /> : <Upload className="w-5 h-5" />}
+                                {sending ? 'Procesando archivos...' : 'Ejecutar Análisis Completo'}
                             </Button>
                         </div>
-                    </>
+                    </div>
                 )}
             </div>
         </motion.div>

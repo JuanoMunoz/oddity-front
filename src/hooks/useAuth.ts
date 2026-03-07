@@ -4,9 +4,9 @@ import { useState, useEffect, useCallback } from "react";
 import z from "zod";
 import { SignUp, SignIn } from "../interface/Auth/user-scheme";
 import type { SignUpData, SignInData } from "../interface/Auth/user-scheme";
-
+import { API_URL } from "../lib/oddityClient";
 export const authClient = createAuthClient({
-    baseURL: "https://oddity-back.onrender.com",
+    baseURL: API_URL,
     plugins: [
         adminClient(),
         inferAdditionalFields({

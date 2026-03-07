@@ -17,19 +17,14 @@
   }
 
   body.light {
-    background-color: #F8F9FA;
+    background-color: #F0F2F5;
     color: #0F172A;
   }
 
   /* --- Global Text Normalization --- */
 
-  /* Headings: Secondary (Dark Blue) in Light, White in Dark */
-  h1,
-  h2,
-  h3,
-  h4,
-  h5,
-  h6 {
+  /* Headings */
+  h1, h2, h3, h4, h5, h6 {
     @apply transition-colors duration-300;
     color: #FFFFFF;
   }
@@ -43,10 +38,8 @@
     color: var(--color-secondary);
   }
 
-  /* Paragraphs & General text: Faded Beige in Dark, Slate-600 in Light */
-  p,
-  span,
-  label {
+  /* Paragraphs & General text */
+  p, span, label {
     @apply transition-colors duration-300;
     color: rgba(241, 240, 234, 0.7);
   }
@@ -55,12 +48,10 @@
   .light span,
   .light label {
     color: #475569;
-    /* slate-600 */
   }
 
-  /* Enforce bold/important text remains visible */
-  .font-bold,
-  .font-black {
+  /* Bold text stays readable */
+  .font-bold, .font-black {
     color: #FFFFFF;
   }
 
@@ -70,9 +61,7 @@
   }
 
   /* Inputs & Forms */
-  input,
-  textarea,
-  select {
+  input, textarea, select {
     @apply transition-colors duration-300;
     color: #FFFFFF;
   }
@@ -81,30 +70,39 @@
   .light textarea,
   .light select {
     color: var(--color-secondary);
+    background-color: #FFFFFF;
   }
 
-  /* Utility Overrides for Visibility */
-  .light .opacity-50,
-  .light .opacity-60,
-  .light .opacity-70 {
-    opacity: 0.8 !important;
+  /* Placeholder contrast in light mode */
+  .light input::placeholder,
+  .light textarea::placeholder {
+    color: #94A3B8;
+    opacity: 1;
   }
 
-  .dark .opacity-50,
-  .dark .opacity-60,
-  .dark .opacity-70 {
-    opacity: 0.6 !important;
-  }
+  /* ============================================
+     LIGHT MODE OPACITY OVERRIDES
+     Tailwind's opacity utilities clash with the
+     light bg—make all "faded" text more visible
+     ============================================ */
+  .light .opacity-10 { opacity: 0.30 !important; }
+  .light .opacity-20 { opacity: 0.45 !important; }
+  .light .opacity-30 { opacity: 0.55 !important; }
+  .light .opacity-40 { opacity: 0.65 !important; }
+  .light .opacity-50 { opacity: 0.75 !important; }
+  .light .opacity-60 { opacity: 0.80 !important; }
+  .light .opacity-70 { opacity: 0.85 !important; }
 
-  .light .opacity-20,
-  .light .opacity-30 {
-    opacity: 0.5 !important;
-  }
+  /* Dark mode defaults */
+  .dark .opacity-40 { opacity: 0.40 !important; }
+  .dark .opacity-50 { opacity: 0.50 !important; }
+  .dark .opacity-60 { opacity: 0.60 !important; }
+  .dark .opacity-70 { opacity: 0.70 !important; }
 }
 
 @layer components {
 
-  /* Surface primitives to prevent "Leaking" */
+  /* Surface primitives */
   .surface-card {
     @apply bg-white/5 border border-white/10 shadow-sm transition-all;
   }
@@ -119,5 +117,45 @@
 
   .light .surface-panel {
     @apply bg-slate-50/50;
+  }
+
+  /* ============================================
+     SCROLLBAR  
+     ============================================ */
+  .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+  .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+  .custom-scrollbar::-webkit-scrollbar-thumb { @apply bg-slate-300 dark:bg-white/10 rounded-full; }
+
+  /* ============================================
+     LIGHT MODE COMPONENT PATCHES
+     ============================================ */
+
+  /* Sidebar section headers (SUPERADMINISTRADOR, etc) */
+  .light .sidebar-section-title {
+    color: #64748B;
+    opacity: 1 !important;
+    font-weight: 800;
+  }
+
+  /* Table / list header labels (AGENTE, ACCIONES, etc) */
+  .light .table-header-label {
+    color: #64748B;
+    opacity: 1 !important;
+  }
+
+  /* Subtle "secondary" button — make it visible on light bg */
+  .light .btn-secondary-subtle {
+    background-color: #E2E8F0;
+    color: #0F172A;
+    border: 1px solid #CBD5E1;
+  }
+  .light .btn-secondary-subtle:hover {
+    background-color: #CBD5E1;
+  }
+
+  /* Remove the blue ambient glow that looks odd in light mode */
+  .light .ambient-glow {
+    box-shadow: none !important;
+    border-color: #E2E8F0 !important;
   }
 }

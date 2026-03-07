@@ -35,7 +35,7 @@ const RootLayout: React.FC = () => {
     return (
         <div className={cn(
             "min-h-screen flex flex-col transition-colors duration-500",
-            theme === 'dark' ? "bg-dark text-custom-white" : "bg-custom-white text-secondary"
+            theme === 'dark' ? "bg-dark text-custom-white" : "bg-slate-50 text-secondary"
         )}>
             {/* Enterprise Navbar */}
             <nav className={cn(
