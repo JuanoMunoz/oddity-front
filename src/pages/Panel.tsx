@@ -647,7 +647,7 @@ function SuperAgentsView({ formVariants, cardClasses, inputClasses, labelClasses
 }
 
 function OrgAgentsView({ formVariants, cardClasses, inputClasses, labelClasses }: any) {
-    const { user } = useApp();
+    const { user, isSuperAdmin } = useApp();
     const { createCustomAgent, loading: createLoading, error, success, setError, setSuccess } = usePanelData();
     const [agents, setAgents] = useState<any[]>([]);
     const [models, setModels] = useState<any[]>([]);
@@ -849,9 +849,11 @@ function OrgAgentsView({ formVariants, cardClasses, inputClasses, labelClasses }
                     <button onClick={fetchData} className="p-2 border border-slate-200 dark:border-white/10 hover:bg-slate-50 dark:hover:bg-white/5 transition-all cursor-pointer">
                         <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
                     </button>
-                    <Button onClick={() => setIsAdding(true)} className="flex items-center gap-2 pl-3">
-                        <PlusCircle size={14} /> Crear Nuevo
-                    </Button>
+                    {isSuperAdmin && (
+                        <Button onClick={() => setIsAdding(true)} className="flex items-center gap-2 pl-3">
+                            <PlusCircle size={14} /> Crear Nuevo
+                        </Button>
+                    )}
                 </div>
             </header>
 
@@ -880,26 +882,28 @@ function OrgAgentsView({ formVariants, cardClasses, inputClasses, labelClasses }
                                 <div className="text-xs font-bold opacity-60">
                                     {a.mode || 'CHAT'}
                                 </div>
-                                <div className="flex items-center gap-1">
-                                    <button
-                                        onClick={async () => {
-                                            const details = await oddityClient.customAgent.findOne(a.id);
-                                            setName(details.name);
-                                            setSystemPrompt(details.systemPrompt);
-                                            setMode(details.mode || 'CHAT');
-                                            setModelId(details.modelId?.toString() || '');
-                                            setExpectedOutput(details.expectedOutput || 'text');
-                                            // @ts-ignore
-                                            setIsAdding(a.id);
-                                        }}
-                                        className="p-2 text-primary hover:bg-primary/10 transition-colors rounded-sm cursor-pointer"
-                                    >
-                                        <Pencil size={16} />
-                                    </button>
-                                    <button onClick={() => handleDelete(a.id)} className="p-2 text-red-500 hover:bg-red-500/10 transition-colors rounded-sm cursor-pointer">
-                                        <Trash2 size={16} />
-                                    </button>
-                                </div>
+                                {isSuperAdmin && (
+                                    <div className="flex items-center gap-1">
+                                        <button
+                                            onClick={async () => {
+                                                const details = await oddityClient.customAgent.findOne(a.id);
+                                                setName(details.name);
+                                                setSystemPrompt(details.systemPrompt);
+                                                setMode(details.mode || 'CHAT');
+                                                setModelId(details.modelId?.toString() || '');
+                                                setExpectedOutput(details.expectedOutput || 'text');
+                                                // @ts-ignore
+                                                setIsAdding(a.id);
+                                            }}
+                                            className="p-2 text-primary hover:bg-primary/10 transition-colors rounded-sm cursor-pointer"
+                                        >
+                                            <Pencil size={16} />
+                                        </button>
+                                        <button onClick={() => handleDelete(a.id)} className="p-2 text-red-500 hover:bg-red-500/10 transition-colors rounded-sm cursor-pointer">
+                                            <Trash2 size={16} />
+                                        </button>
+                                    </div>
+                                )}
                             </div>
                         ))}
                     </div>

@@ -1,11 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { Mail, Lock, User, Building2, ArrowRight, ArrowLeft, ShieldCheck, Loader2 } from 'lucide-react';
+import { Mail, Lock, User, ArrowRight, ArrowLeft, ShieldCheck, Loader2 } from 'lucide-react';
 import Button from '../components/Button';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { useApp } from '../hooks/useApp';
-import { cn } from '../styles/utils';
 
 const Auth: React.FC = () => {
     const location = useLocation();
@@ -40,7 +39,7 @@ const Auth: React.FC = () => {
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
         const { name, value } = e.target;
-        setFormData(prev => ({
+        setFormData((prev: any) => ({
             ...prev,
             [name]: name === 'organizationId' ? parseInt(value) : value
         }));
@@ -74,7 +73,7 @@ const Auth: React.FC = () => {
 
     const inputWrapperClasses = "space-y-1.5";
     const labelClasses = "text-[10px] font-black dark:opacity-40 text-slate-500 uppercase ml-1 tracking-[0.15em]";
-    const inputClasses = "w-full bg-white dark:bg-white/[0.03] border border-slate-200 dark:border-white/10 pl-11 pr-4 py-3 rounded-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 transition-all dark:text-white text-secondary placeholder:text-slate-400 font-medium text-sm";
+    const inputClasses = "w-full bg-white dark:bg-white/3 border border-slate-200 dark:border-white/10 pl-11 pr-4 py-3 rounded-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 transition-all dark:text-white text-secondary placeholder:text-slate-400 font-medium text-sm";
 
     return (
         <div className="min-h-[90vh] flex items-center justify-center px-6 relative overflow-hidden">
@@ -118,7 +117,7 @@ const Auth: React.FC = () => {
                             <button
                                 disabled={loading}
                                 onClick={() => handleGoogleSignIn()}
-                                className="flex items-center justify-center gap-2.5 bg-white dark:bg-white/[0.03] border border-slate-200 dark:border-white/10 py-2.5 rounded-sm font-bold text-xs uppercase tracking-widest hover:bg-slate-50 dark:hover:bg-white/8 transition-all cursor-pointer shadow-sm dark:text-white text-secondary active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
+                                className="flex items-center justify-center gap-2.5 bg-white dark:bg-white/3 border border-slate-200 dark:border-white/10 py-2.5 rounded-sm font-bold text-xs uppercase tracking-widest hover:bg-slate-50 dark:hover:bg-white/8 transition-all cursor-pointer shadow-sm dark:text-white text-secondary active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                                 <img src="https://www.google.com/favicon.ico" alt="Google" className="w-4 h-4" />
                                 <span>Google</span>
@@ -126,7 +125,7 @@ const Auth: React.FC = () => {
                             <button
                                 disabled={loading}
                                 onClick={() => handleMicrosoftSignIn()}
-                                className="flex items-center justify-center gap-2.5 bg-white dark:bg-white/[0.03] border border-slate-200 dark:border-white/10 py-2.5 rounded-sm font-bold text-xs uppercase tracking-widest hover:bg-slate-50 dark:hover:bg-white/8 transition-all cursor-pointer shadow-sm dark:text-white text-secondary active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
+                                className="flex items-center justify-center gap-2.5 bg-white dark:bg-white/3 border border-slate-200 dark:border-white/10 py-2.5 rounded-sm font-bold text-xs uppercase tracking-widest hover:bg-slate-50 dark:hover:bg-white/8 transition-all cursor-pointer shadow-sm dark:text-white text-secondary active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                                 <img src="https://www.microsoft.com/favicon.ico" alt="Microsoft" className="w-4 h-4" />
                                 <span>Microsoft</span>
@@ -203,36 +202,7 @@ const Auth: React.FC = () => {
                                 </div>
                             </div>
 
-                            {!isLogin && (
-                                <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="grid grid-cols-2 gap-3">
-                                    <div className={inputWrapperClasses}>
-                                        <label className={labelClasses}>Org ID</label>
-                                        <div className="relative">
-                                            <Building2 className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 opacity-30 text-secondary dark:text-white" />
-                                            <input
-                                                name="organizationId"
-                                                type="number"
-                                                required
-                                                value={formData.organizationId}
-                                                onChange={handleChange}
-                                                className={cn(inputClasses)}
-                                            />
-                                        </div>
-                                    </div>
-                                    <div className={inputWrapperClasses}>
-                                        <label className={labelClasses}>Cargo</label>
-                                        <select
-                                            name="role"
-                                            value={formData.role}
-                                            onChange={handleChange}
-                                            className={cn(inputClasses, "pl-4 appearance-none cursor-pointer")}
-                                        >
-                                            <option value="admin">Administrador</option>
-                                            <option value="user">Colaborador</option>
-                                        </select>
-                                    </div>
-                                </motion.div>
-                            )}
+                            {/* Role and Org ID removed - to be handled in onboarding */}
 
                             <Button
                                 type="submit"
