@@ -9,12 +9,6 @@ export const authClient = createAuthClient({
     baseURL: API_URL,
     plugins: [
         adminClient(),
-        inferAdditionalFields({
-            user: {
-                organizationId: { type: "number" },
-                role: { type: "string" }
-            }
-        })
     ]
 });
 
@@ -36,7 +30,20 @@ export const useAuth = () => {
         setError(null);
         try {
             const validatedData = SignUp.parse(data);
-            const res = await authClient.signUp.email(validatedData);
+            console.log("DEBUG: Sending signUp request with:", {
+                name: validatedData.name,
+                email: validatedData.email,
+                password: '***'
+            });
+
+            // Using @ts-ignore if better-auth still demands role/org due to plugin inference
+            // but the goal is to NOT send them so the backend doesn't reject.
+            const res = await authClient.signUp.email({
+                email: validatedData.email,
+                password: validatedData.password,
+                name: validatedData.name,
+            } as any);
+
             if (res.error) setError(res.error.message ?? 'Error desconocido');
             return res;
         } catch (err) {
