@@ -200,8 +200,6 @@ const Auth: React.FC = () => {
                                 </div>
                             </div>
 
-                            {/* Role and Org ID removed - to be handled in onboarding */}
-
                             <Button
                                 type="submit"
                                 disabled={loading}
