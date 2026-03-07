@@ -33,15 +33,13 @@ const Auth: React.FC = () => {
         name: '',
         email: '',
         password: '',
-        organizationId: 0,
-        role: 'user'
     });
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
         const { name, value } = e.target;
         setFormData((prev: any) => ({
             ...prev,
-            [name]: name === 'organizationId' ? parseInt(value) : value
+            [name]: value
         }));
     };
 
