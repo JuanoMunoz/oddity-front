@@ -120,6 +120,11 @@ export const oddityClient = {
             fetchClient<Organization>(`/api/organization/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
         remove: (id: string | number) =>
             fetchClient<void>(`/api/organization/${id}`, { method: 'DELETE' }),
+        link: (accessToken: string, userId: string) =>
+            fetchClient<{ organization: Organization; agents: any[] }>('/api/organization/link', {
+                method: 'POST',
+                body: JSON.stringify({ accessToken, userId })
+            }),
     },
 
     iaModel: {
@@ -148,12 +153,64 @@ export const oddityClient = {
             fetchClient<CustomAgent>(`/api/custom-agent/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
         remove: (id: string | number) =>
             fetchClient<void>(`/api/custom-agent/${id}`, { method: 'DELETE' }),
-        use: (data: FormData | any) => {
+        use: async (data: FormData | any, onProgress?: (msg: string) => void) => {
             const isForm = data instanceof FormData;
-            return fetchClient<any>('/api/custom-agent/use', {
+            const headers = new Headers();
+            if (!isForm) headers.set('Content-Type', 'application/json');
+
+            const response = await fetch(`${API_URL}/api/custom-agent/use`, {
                 method: 'POST',
+                headers,
+                credentials: 'include',
                 body: isForm ? data : JSON.stringify(data)
             });
+
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}));
+                throw new Error(errorData.message || `Error ${response.status}: ${response.statusText}`);
+            }
+
+            const contentType = response.headers.get('content-type') || '';
+            if (contentType.includes('application/json')) {
+                return response.json();
+            }
+
+            // Stream handler
+            const reader = response.body?.getReader();
+            if (!reader) return {};
+
+            const decoder = new TextDecoder();
+            let result = {};
+            let buffer = '';
+
+            try {
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop() || ''; // Keep incomplete line
+
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            try {
+                                const parsed = JSON.parse(line.substring(6));
+                                if (parsed.type === 'progress' && onProgress) {
+                                    onProgress(parsed.message);
+                                } else if (parsed.type === 'complete') {
+                                    result = parsed.result;
+                                } else if (parsed.type === 'error') {
+                                    throw new Error(parsed.message);
+                                }
+                            } catch (e) { }
+                        }
+                    }
+                }
+            } finally {
+                reader.releaseLock();
+            }
+            return result;
         },
         analyzeToPrompt: (data: FormData) => {
             return fetchClient<any>('/api/custom-agent/analyze-to-prompt', {

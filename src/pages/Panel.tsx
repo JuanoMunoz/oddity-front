@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback, createContext, useContext } from 'react';
 import {
     PlusCircle,
     Cpu,
@@ -17,7 +17,10 @@ import {
     Briefcase,
     Trash2,
     Bot,
-    Paperclip
+    Paperclip,
+    CheckCircle2,
+    AlertCircle,
+    Info
 } from 'lucide-react';
 import { oddityClient } from '../lib/oddityClient';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -31,10 +34,59 @@ import { cn } from '../styles/utils';
 import { useAdminUsers, type UserRole, ASSIGNABLE_ROLES, ROLE_LABELS, useUpdateUser } from '../hooks/useAuth';
 import { useApp } from '../hooks/useApp';
 import { usePanelData } from '../hooks/usePanelData';
+import type { UserData } from '../lib/types';
+
+// ─────────────────────────────────────────────
+// Toast System
+// ─────────────────────────────────────────────
+type ToastType = 'success' | 'error' | 'info' | 'progress';
+interface Toast { id: number; message: string; type: ToastType; }
+
+let _toastId = 0;
+const ToastContext = createContext<(msg: string, type?: ToastType) => void>(() => { });
+export const usePanelToast = () => useContext(ToastContext);
+
+const ToastContainer: React.FC<{ toasts: Toast[] }> = ({ toasts }) => (
+    <div className="fixed bottom-6 right-6 z-50 flex flex-col gap-2 pointer-events-none">
+        <AnimatePresence>
+            {toasts.map(t => (
+                <motion.div
+                    key={t.id}
+                    initial={{ opacity: 0, x: 32, scale: 0.95 }}
+                    animate={{ opacity: 1, x: 0, scale: 1 }}
+                    exit={{ opacity: 0, x: 32, scale: 0.95 }}
+                    transition={{ duration: 0.2 }}
+                    className={cn(
+                        "flex items-center gap-3 px-4 py-3 rounded-sm shadow-lg border text-xs font-bold max-w-xs backdrop-blur-sm",
+                        t.type === 'success' && "bg-emerald-950/95 border-emerald-500/30 text-emerald-300",
+                        t.type === 'error' && "bg-red-950/95 border-red-500/30 text-red-300",
+                        t.type === 'info' && "bg-slate-900/95 border-white/10 text-slate-200",
+                        t.type === 'progress' && "bg-primary/10 border-primary/30 text-primary",
+                    )}
+                >
+                    {t.type === 'success' && <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />}
+                    {t.type === 'error' && <AlertCircle className="w-3.5 h-3.5 shrink-0" />}
+                    {t.type === 'info' && <Info className="w-3.5 h-3.5 shrink-0" />}
+                    {t.type === 'progress' && <Loader2 className="w-3.5 h-3.5 shrink-0 animate-spin" />}
+                    <span>{t.message}</span>
+                </motion.div>
+            ))}
+        </AnimatePresence>
+    </div>
+);
 
 export const Panel: React.FC = () => {
     const [isCollapsed, setIsCollapsed] = useState(false);
     const [activeView, setActiveView] = useState<ViewId>('user-data');
+    const [toasts, setToasts] = useState<Toast[]>([]);
+
+    const addToast = useCallback((msg: string, type: ToastType = 'info') => {
+        const id = ++_toastId;
+        setToasts(prev => [...prev, { id, message: msg, type }]);
+        const ttl = type === 'progress' ? 3500 : 5000;
+        setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), ttl);
+    }, []);
+
     const formVariants: any = {
         hidden: { opacity: 0, y: 8 },
         visible: { opacity: 1, y: 0, transition: { duration: 0.2 } },
@@ -49,7 +101,7 @@ export const Panel: React.FC = () => {
     const renderContent = () => {
         if (typeof activeView === 'string' && activeView.startsWith('agent-')) {
             const agentId = activeView.split('-')[1];
-            return <AgentChatView key={activeView} agentId={agentId} formVariants={formVariants} inputClasses={inputClasses} cardClasses={cardClasses} />;
+            return <AgentChatView key={activeView} agentId={agentId} formVariants={formVariants} inputClasses={inputClasses} cardClasses={cardClasses} addToast={addToast} />;
         }
 
         switch (activeView) {
@@ -90,20 +142,25 @@ export const Panel: React.FC = () => {
     };
 
     return (
-        <div className={cn("flex h-[calc(100vh-3.5rem)] overflow-hidden", theme === 'light' ? 'bg-slate-100' : 'bg-transparent')}>
-            <Sidebar isCollapsed={isCollapsed} setIsCollapsed={setIsCollapsed} activeView={activeView} setActiveView={setActiveView} />
+        <ToastContext.Provider value={addToast}>
+            <div className={cn("flex h-[calc(100vh-3.5rem)] overflow-hidden", theme === 'light' ? 'bg-slate-100' : 'bg-transparent')}>
+                <Sidebar isCollapsed={isCollapsed} setIsCollapsed={setIsCollapsed} activeView={activeView} setActiveView={setActiveView} />
 
-            <main className={cn("flex-1 overflow-y-auto p-8 transition-all duration-300 custom-scrollbar", theme === 'light' ? 'bg-slate-100' : 'surface-panel')}>
-                <AnimatePresence mode="wait">
-                    {renderContent()}
-                </AnimatePresence>
-            </main>
-        </div>
+                <main className={cn("flex-1 overflow-y-auto p-8 transition-all duration-300 custom-scrollbar", theme === 'light' ? 'bg-slate-100' : 'surface-panel')}>
+                    <AnimatePresence mode="wait">
+                        {renderContent()}
+                    </AnimatePresence>
+                </main>
+
+                <ToastContainer toasts={toasts} />
+            </div>
+        </ToastContext.Provider>
     );
 };
 
 function UserDataView({ formVariants, cardClasses, inputClasses, labelClasses }: { formVariants: any; cardClasses: string; inputClasses: string; labelClasses: string }) {
-    const { user } = useApp();
+    const { user: rawUser } = useApp();
+    const user = rawUser as UserData | null;
     const { updateName, loading, success, error } = useUpdateUser();
 
     const [isEditingName, setIsEditingName] = useState(false);
@@ -647,7 +704,8 @@ function SuperAgentsView({ formVariants, cardClasses, inputClasses, labelClasses
 }
 
 function OrgAgentsView({ formVariants, cardClasses, inputClasses, labelClasses }: any) {
-    const { user, isSuperAdmin } = useApp();
+    const { user: rawUser, isSuperAdmin } = useApp();
+    const user = rawUser as UserData | null;
     const { createCustomAgent, loading: createLoading, error, success, setError, setSuccess } = usePanelData();
     const [agents, setAgents] = useState<any[]>([]);
     const [models, setModels] = useState<any[]>([]);
@@ -1200,7 +1258,7 @@ function SuperOrgsView({ formVariants, cardClasses, inputClasses, labelClasses }
     );
 }
 
-function AgentChatView({ agentId, formVariants, inputClasses, cardClasses }: any) {
+function AgentChatView({ agentId, formVariants, inputClasses, cardClasses, addToast }: any) {
     const [agent, setAgent] = useState<any>(null);
     const [loading, setLoading] = useState(true);
 
@@ -1216,13 +1274,13 @@ function AgentChatView({ agentId, formVariants, inputClasses, cardClasses }: any
     if (!agent) return <div className="h-full flex items-center justify-center opacity-40 font-bold text-sm">Agente no encontrado</div>;
 
     if (agent.mode === 'FILE') {
-        return <AgentDocumentInterface agent={agent} formVariants={formVariants} inputClasses={inputClasses} cardClasses={cardClasses} />;
+        return <AgentDocumentInterface agent={agent} formVariants={formVariants} inputClasses={inputClasses} cardClasses={cardClasses} addToast={addToast} />;
     }
 
-    return <AgentChatInterface agent={agent} formVariants={formVariants} inputClasses={inputClasses} cardClasses={cardClasses} />;
+    return <AgentChatInterface agent={agent} formVariants={formVariants} inputClasses={inputClasses} cardClasses={cardClasses} addToast={addToast} />;
 }
 
-function AgentChatInterface({ agent, formVariants, inputClasses, cardClasses }: any) {
+function AgentChatInterface({ agent, formVariants, inputClasses, cardClasses, addToast }: any) {
     const [messages, setMessages] = useState<Array<{ role: string, content: string, files?: string[] }>>([]);
     const [input, setInput] = useState('');
     const [files, setFiles] = useState<File[]>([]);
@@ -1270,7 +1328,10 @@ function AgentChatInterface({ agent, formVariants, inputClasses, cardClasses }: 
                 formData.append('customAgentId', agent.id.toString());
                 formData.append('prompt', userMsg);
                 formData.append('history', JSON.stringify(historyDto));
-                res = await oddityClient.customAgent.use(formData);
+                addToast?.('Procesando archivo con IA...', 'progress');
+                res = await oddityClient.customAgent.use(formData, (msg: string) => {
+                    addToast?.(msg, 'progress');
+                });
             } else {
                 res = await oddityClient.customAgent.use({
                     customAgentId: agent.id,
@@ -1607,7 +1668,7 @@ const ResultPDF = ({ content, title }: any) => {
     );
 };
 
-function AgentDocumentInterface({ agent, formVariants, inputClasses, cardClasses }: any) {
+function AgentDocumentInterface({ agent, formVariants, inputClasses, cardClasses, addToast }: any) {
     const [files, setFiles] = useState<File[]>([]);
     const [prompt, setPrompt] = useState('');
     const [sending, setSending] = useState(false);
@@ -1634,12 +1695,16 @@ function AgentDocumentInterface({ agent, formVariants, inputClasses, cardClasses
         formData.append('history', JSON.stringify([]));
 
         try {
-            const res = await oddityClient.customAgent.use(formData);
+            addToast?.('Procesando documento con IA...', 'progress');
+            const res = await oddityClient.customAgent.use(formData, (msg: string) => {
+                addToast?.(msg, 'progress');
+            });
             const aiResponse = res.text || res.message || (typeof res === 'string' ? res : JSON.stringify(res));
             // Use server's expectedOutput; fallback to agent's configured expectedOutput
             const outputType = res.expectedOutput || agent.expectedOutput || 'text';
 
             setResult({ text: aiResponse, type: outputType });
+            addToast?.('✓ Procesamiento completado', 'success');
 
             // AUTO DOWNLOAD for large files or excel mode
             if (outputType === 'excel') {
@@ -1647,6 +1712,7 @@ function AgentDocumentInterface({ agent, formVariants, inputClasses, cardClasses
             }
         } catch (e: any) {
             setResult({ text: `Error: ${e.message}`, type: 'text' });
+            addToast?.(`Error: ${e.message}`, 'error');
         } finally {
             setSending(false);
         }
@@ -1825,7 +1891,8 @@ function AgentDocumentInterface({ agent, formVariants, inputClasses, cardClasses
 // Org Info View
 // ================================================================
 function OrgInfoView({ formVariants, cardClasses }: any) {
-    const { user } = useApp();
+    const { user: rawUser } = useApp();
+    const user = rawUser as UserData | null;
     const [org, setOrg] = useState<any>(null);
     const [users, setUsers] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
@@ -1927,7 +1994,8 @@ function OrgInfoView({ formVariants, cardClasses }: any) {
 // Org Usage View
 // ================================================================
 function OrgUsageView({ formVariants, cardClasses }: any) {
-    const { user } = useApp();
+    const { user: rawUser } = useApp();
+    const user = rawUser as UserData | null;
     const [period, setPeriod] = useState<'today' | '30d' | '90d'>('30d');
     const [stats, setStats] = useState<any>(null);
     const [loading, setLoading] = useState(false);

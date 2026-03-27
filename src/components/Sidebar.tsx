@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { cn } from '../styles/utils';
 import { useApp } from '../hooks/useApp';
+import type { UserData } from '../lib/types';
 
 export type ViewId = string;
 
@@ -27,7 +28,8 @@ interface SidebarProps {
 }
 
 const Sidebar: React.FC<SidebarProps> = ({ isCollapsed, setIsCollapsed, activeView, setActiveView }) => {
-    const { user, isAdmin, isSuperAdmin } = useApp();
+    const { user: rawUser, isAdmin, isSuperAdmin } = useApp();
+    const user = rawUser as UserData | null;
     const [agents, setAgents] = React.useState<any[]>([]);
 
     React.useEffect(() => {

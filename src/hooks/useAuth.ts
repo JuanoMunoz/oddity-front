@@ -9,6 +9,11 @@ export const authClient = createAuthClient({
     baseURL: API_URL,
     plugins: [
         adminClient(),
+        inferAdditionalFields({
+            user: {
+                organizationId: { type: "number" },
+            }
+        })
     ]
 });
 
