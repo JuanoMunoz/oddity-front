@@ -228,10 +228,10 @@ export const oddityClient = {
          */
         useStreamExcel: async (
             data: FormData,
-            filename = 'resultado',
             onProgress?: (msg: string) => void,
         ): Promise<{ jobId: string }> => {
-            if (onProgress) onProgress('Iniciando pipeline de streaming...');
+            if (onProgress) onProgress('Iniciando procesamiento de Excel...');
+
 
             const response = await fetch(`${API_URL}/api/custom-agent/use/stream-excel`, {
                 method: 'POST',
@@ -244,46 +244,50 @@ export const oddityClient = {
                 throw new Error(errorData.message || `Error ${response.status}: ${response.statusText}`);
             }
 
-            const jobId = response.headers.get('x-pipeline-jobid') || '';
-
-            if (jobId && onProgress) onProgress(`Pipeline activo (jobId: ${jobId})`);
-
-            // Read binary stream
             const reader = response.body?.getReader();
-            if (!reader) throw new Error('No response body available for streaming');
+            if (!reader) throw new Error('No response body available');
 
-            const chunks: BlobPart[] = [];
-            let totalBytes = 0;
+            const decoder = new TextDecoder();
+            let finalJobId = '';
 
             try {
                 while (true) {
                     const { done, value } = await reader.read();
                     if (done) break;
-                    chunks.push(value);
-                    totalBytes += value.byteLength;
-                    if (onProgress && totalBytes % (1024 * 1024) < value.byteLength) {
-                        // Report every ~1MB
-                        onProgress(`Recibidos ${(totalBytes / (1024 * 1024)).toFixed(1)} MB...`);
+
+                    const chunk = decoder.decode(value, { stream: true });
+                    const lines = chunk.split('\n');
+
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            try {
+                                const parsed = JSON.parse(line.slice(6));
+                                if (parsed.type === 'progress') {
+                                    if (onProgress) onProgress(parsed.message);
+                                } else if (parsed.type === 'complete') {
+                                    finalJobId = parsed.jobId;
+                                    if (onProgress) onProgress('✓ Procesamiento completo. Iniciando descarga...');
+
+                                    // Trigger final download from the permanent storage
+                                    const downloadUrl = `${API_URL}/api/custom-agent/download/${finalJobId}`;
+                                    window.open(downloadUrl, '_blank');
+                                } else if (parsed.type === 'error') {
+
+                                    throw new Error(parsed.message);
+                                }
+                            } catch (e: any) {
+                                if (e.message && e.message.includes('Error')) throw e;
+                            }
+                        }
                     }
                 }
             } finally {
                 reader.releaseLock();
             }
 
-            // Assemble and trigger browser download
-            const blob = new Blob(chunks, { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `${filename}.xlsx`;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
-
-            if (onProgress) onProgress(`✓ Descarga completada (${(totalBytes / 1024).toFixed(0)} KB)`);
-            return { jobId };
+            return { jobId: finalJobId };
         },
+
 
         getResultUrl: (jobId: string) => `${API_URL}/api/custom-agent/download/${jobId}`,
 
