@@ -230,7 +230,7 @@ export const oddityClient = {
             data: FormData,
             filename = 'resultado',
             onProgress?: (msg: string) => void,
-        ): Promise<void> => {
+        ): Promise<{ jobId: string }> => {
             if (onProgress) onProgress('Iniciando pipeline de streaming...');
 
             const response = await fetch(`${API_URL}/api/custom-agent/use/stream-excel`, {
@@ -245,6 +245,7 @@ export const oddityClient = {
             }
 
             const jobId = response.headers.get('x-pipeline-jobid') || '';
+
             if (jobId && onProgress) onProgress(`Pipeline activo (jobId: ${jobId})`);
 
             // Read binary stream
@@ -281,7 +282,12 @@ export const oddityClient = {
             URL.revokeObjectURL(url);
 
             if (onProgress) onProgress(`✓ Descarga completada (${(totalBytes / 1024).toFixed(0)} KB)`);
+            return { jobId };
         },
+
+        getResultUrl: (jobId: string) => `${API_URL}/api/custom-agent/download/${jobId}`,
+
+
 
         analyzeToPrompt: (data: FormData) => {
             return fetchClient<any>('/api/custom-agent/analyze-to-prompt', {

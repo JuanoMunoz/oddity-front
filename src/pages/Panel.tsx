@@ -1285,7 +1285,9 @@ interface Message {
     content: string;
     files?: string[];
     isStreamed?: boolean;
+    jobId?: string;
 }
+
 
 function AgentChatInterface({ agent, formVariants, inputClasses, cardClasses, addToast }: any) {
     const [messages, setMessages] = useState<Message[]>([]);
@@ -1360,7 +1362,7 @@ function AgentChatInterface({ agent, formVariants, inputClasses, cardClasses, ad
                 formDataRedirect.append('prompt', userMsg);
                 formDataRedirect.append('history', JSON.stringify(historyDto));
 
-                await oddityClient.customAgent.useStreamExcel(
+                const { jobId } = await oddityClient.customAgent.useStreamExcel(
                     formDataRedirect,
                     filename,
                     (msg: string) => addToast?.(msg, 'progress'),
@@ -1368,11 +1370,13 @@ function AgentChatInterface({ agent, formVariants, inputClasses, cardClasses, ad
 
                 setMessages(prev => [...prev, {
                     role: 'ai',
-                    content: 'El archivo ha sido procesado mediante streaming y descargado automáticamente como CSV.',
-                    isStreamed: true
+                    content: 'El archivo ha sido procesado mediante streaming y descargado automáticamente.',
+                    isStreamed: true,
+                    jobId // Store jobId in the message
                 }]);
-                addToast?.('✓ Archivo descargado', 'success');
+                addToast?.('✓ Archivo procesado', 'success');
                 return;
+
             }
 
             const aiResponse = res.text || res.message || (typeof res === 'string' ? res : JSON.stringify(res));
@@ -1719,7 +1723,8 @@ function AgentDocumentInterface({ agent, formVariants, inputClasses, cardClasses
     const [files, setFiles] = useState<File[]>([]);
     const [prompt, setPrompt] = useState('');
     const [sending, setSending] = useState(false);
-    const [result, setResult] = useState<{ text: string, type: string } | null>(null);
+    const [result, setResult] = useState<{ text: string, type: string, jobId?: string } | null>(null);
+
 
     const onDrop = (acceptedFiles: File[]) => {
         setFiles(prev => [...prev, ...acceptedFiles]);
@@ -1754,17 +1759,18 @@ function AgentDocumentInterface({ agent, formVariants, inputClasses, cardClasses
                 addToast?.('Iniciando pipeline de streaming para Excel grande...', 'progress');
 
                 const filename = `${agent.name.replace(/\s+/g, '_')}_resultado`;
-                await oddityClient.customAgent.useStreamExcel(
+                const { jobId } = await oddityClient.customAgent.useStreamExcel(
                     formData,
                     filename,
                     (msg: string) => addToast?.(msg, 'progress'),
                 );
 
                 // Mark result as successfully streamed (no in-memory content)
-                setResult({ text: '__streamed__', type: 'excel' });
-                addToast?.('✓ Archivo CSV descargado correctamente', 'success');
+                setResult({ text: '__streamed__', type: 'excel', jobId });
+                addToast?.('✓ Procesamiento completado', 'success');
                 return;
             }
+
 
             // ── Normal SSE path (chat, image, video, small files) ────────────
             addToast?.('Procesando documento con IA...', 'progress');
@@ -1776,14 +1782,15 @@ function AgentDocumentInterface({ agent, formVariants, inputClasses, cardClasses
             if ((res as any).__redirect) {
                 addToast?.('Redirigiendo a pipeline de streaming...', 'progress');
                 const filename = `${agent.name.replace(/\s+/g, '_')}_resultado`;
-                await oddityClient.customAgent.useStreamExcel(
+                const { jobId } = await oddityClient.customAgent.useStreamExcel(
                     formData,
                     filename,
                     (msg: string) => addToast?.(msg, 'progress'),
                 );
-                setResult({ text: '__streamed__', type: 'excel' });
-                addToast?.('✓ Archivo CSV descargado correctamente', 'success');
+                setResult({ text: '__streamed__', type: 'excel', jobId });
+                addToast?.('✓ Procesamiento completado', 'success');
                 return;
+
             }
 
             const aiResponse = res.text || res.message || (typeof res === 'string' ? res : JSON.stringify(res));
@@ -1917,15 +1924,19 @@ function AgentDocumentInterface({ agent, formVariants, inputClasses, cardClasses
                                     {result.text.includes('__streamed__') ? (
                                         <Button
                                             onClick={() => {
-                                                const formData = new FormData();
-                                                files.forEach(f => formData.append('files', f));
-                                                formData.append('customAgentId', agent.id.toString());
-                                                if (prompt) formData.append('prompt', prompt);
-                                                formData.append('history', JSON.stringify([]));
-                                                const filename = `${agent.name.replace(/\s+/g, '_')}_resultado`;
-                                                addToast?.('Re-descargando...', 'progress');
-                                                oddityClient.customAgent.useStreamExcel(formData, filename, (msg: string) => addToast?.(msg, 'progress'))
-                                                    .catch((e: any) => addToast?.(`Error: ${e.message}`, 'error'));
+                                                if (result.jobId) {
+                                                    window.open(oddityClient.customAgent.getResultUrl(result.jobId), '_blank');
+                                                } else {
+                                                    const formData = new FormData();
+                                                    files.forEach(f => formData.append('files', f));
+                                                    formData.append('customAgentId', agent.id.toString());
+                                                    if (prompt) formData.append('prompt', prompt);
+                                                    formData.append('history', JSON.stringify([]));
+                                                    const filename = `${agent.name.replace(/\s+/g, '_')}_resultado`;
+                                                    addToast?.('Iniciando re-procesamiento...', 'progress');
+                                                    oddityClient.customAgent.useStreamExcel(formData, filename, (msg: string) => addToast?.(msg, 'progress'))
+                                                        .catch((e: any) => addToast?.(`Error: ${e.message}`, 'error'));
+                                                }
                                             }}
                                             className="bg-green-600 hover:bg-green-700 text-white gap-2"
                                         >
