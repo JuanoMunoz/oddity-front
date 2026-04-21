@@ -202,9 +202,10 @@ export const oddityClient = {
                                     result = parsed.result;
                                 } else if (parsed.type === 'redirect') {
                                     // Backend signaled large Excel → switch to streaming download
-                                    // Return a sentinel so the caller knows to trigger useStreamCsv
+                                    // Return a sentinel so the caller knows to trigger useStreamExcel
                                     result = { __redirect: true, endpoint: parsed.endpoint };
                                 } else if (parsed.type === 'error') {
+
                                     throw new Error(parsed.message);
                                 }
                             } catch (e) { }
@@ -219,21 +220,20 @@ export const oddityClient = {
 
         /**
          * Streams large-Excel output directly from the pipeline endpoint.
-         * The server sends Transfer-Encoding: chunked CSV.
-         * This method collects the stream, builds a Blob, and triggers a download.
+         * The server sends Transfer-Encoding: chunked XLSX binary.
          *
          * @param data          FormData with files + customAgentId + prompt
          * @param filename      Desired download filename (without extension)
          * @param onProgress    Optional progress callback
          */
-        useStreamCsv: async (
+        useStreamExcel: async (
             data: FormData,
             filename = 'resultado',
             onProgress?: (msg: string) => void,
         ): Promise<void> => {
             if (onProgress) onProgress('Iniciando pipeline de streaming...');
 
-            const response = await fetch(`${API_URL}/api/custom-agent/use/stream-csv`, {
+            const response = await fetch(`${API_URL}/api/custom-agent/use/stream-excel`, {
                 method: 'POST',
                 credentials: 'include',
                 body: data,
@@ -247,7 +247,7 @@ export const oddityClient = {
             const jobId = response.headers.get('x-pipeline-jobid') || '';
             if (jobId && onProgress) onProgress(`Pipeline activo (jobId: ${jobId})`);
 
-            // Read the chunked stream into a Blob without buffering the whole thing
+            // Read binary stream
             const reader = response.body?.getReader();
             if (!reader) throw new Error('No response body available for streaming');
 
@@ -260,9 +260,9 @@ export const oddityClient = {
                     if (done) break;
                     chunks.push(value);
                     totalBytes += value.byteLength;
-                    if (onProgress && totalBytes % (512 * 1024) < value.byteLength) {
-                        // Report every ~512 KB
-                        onProgress(`Recibidos ${(totalBytes / 1024).toFixed(0)} KB...`);
+                    if (onProgress && totalBytes % (1024 * 1024) < value.byteLength) {
+                        // Report every ~1MB
+                        onProgress(`Recibidos ${(totalBytes / (1024 * 1024)).toFixed(1)} MB...`);
                     }
                 }
             } finally {
@@ -270,11 +270,11 @@ export const oddityClient = {
             }
 
             // Assemble and trigger browser download
-            const blob = new Blob(chunks, { type: 'text/csv;charset=utf-8;' });
+            const blob = new Blob(chunks, { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = `${filename}.csv`;
+            a.download = `${filename}.xlsx`;
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
@@ -282,6 +282,7 @@ export const oddityClient = {
 
             if (onProgress) onProgress(`✓ Descarga completada (${(totalBytes / 1024).toFixed(0)} KB)`);
         },
+
         analyzeToPrompt: (data: FormData) => {
             return fetchClient<any>('/api/custom-agent/analyze-to-prompt', {
                 method: 'POST',
