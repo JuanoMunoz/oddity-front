@@ -180,7 +180,7 @@ export const oddityClient = {
             if (!reader) return {};
 
             const decoder = new TextDecoder();
-            let result = {};
+            let result: any = {};
             let buffer = '';
 
             try {
@@ -200,6 +200,10 @@ export const oddityClient = {
                                     onProgress(parsed.message);
                                 } else if (parsed.type === 'complete') {
                                     result = parsed.result;
+                                } else if (parsed.type === 'redirect') {
+                                    // Backend signaled large Excel → switch to streaming download
+                                    // Return a sentinel so the caller knows to trigger useStreamCsv
+                                    result = { __redirect: true, endpoint: parsed.endpoint };
                                 } else if (parsed.type === 'error') {
                                     throw new Error(parsed.message);
                                 }
@@ -211,6 +215,72 @@ export const oddityClient = {
                 reader.releaseLock();
             }
             return result;
+        },
+
+        /**
+         * Streams large-Excel output directly from the pipeline endpoint.
+         * The server sends Transfer-Encoding: chunked CSV.
+         * This method collects the stream, builds a Blob, and triggers a download.
+         *
+         * @param data          FormData with files + customAgentId + prompt
+         * @param filename      Desired download filename (without extension)
+         * @param onProgress    Optional progress callback
+         */
+        useStreamCsv: async (
+            data: FormData,
+            filename = 'resultado',
+            onProgress?: (msg: string) => void,
+        ): Promise<void> => {
+            if (onProgress) onProgress('Iniciando pipeline de streaming...');
+
+            const response = await fetch(`${API_URL}/api/custom-agent/use/stream-csv`, {
+                method: 'POST',
+                credentials: 'include',
+                body: data,
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}));
+                throw new Error(errorData.message || `Error ${response.status}: ${response.statusText}`);
+            }
+
+            const jobId = response.headers.get('x-pipeline-jobid') || '';
+            if (jobId && onProgress) onProgress(`Pipeline activo (jobId: ${jobId})`);
+
+            // Read the chunked stream into a Blob without buffering the whole thing
+            const reader = response.body?.getReader();
+            if (!reader) throw new Error('No response body available for streaming');
+
+            const chunks: BlobPart[] = [];
+            let totalBytes = 0;
+
+            try {
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    chunks.push(value);
+                    totalBytes += value.byteLength;
+                    if (onProgress && totalBytes % (512 * 1024) < value.byteLength) {
+                        // Report every ~512 KB
+                        onProgress(`Recibidos ${(totalBytes / 1024).toFixed(0)} KB...`);
+                    }
+                }
+            } finally {
+                reader.releaseLock();
+            }
+
+            // Assemble and trigger browser download
+            const blob = new Blob(chunks, { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${filename}.csv`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+
+            if (onProgress) onProgress(`✓ Descarga completada (${(totalBytes / 1024).toFixed(0)} KB)`);
         },
         analyzeToPrompt: (data: FormData) => {
             return fetchClient<any>('/api/custom-agent/analyze-to-prompt', {

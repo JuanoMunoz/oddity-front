@@ -1694,19 +1694,57 @@ function AgentDocumentInterface({ agent, formVariants, inputClasses, cardClasses
         if (prompt) formData.append('prompt', prompt);
         formData.append('history', JSON.stringify([]));
 
+        const isExcelAgent = agent.expectedOutput === 'excel';
+        const hasExcelFile = files.some(f =>
+            f.name.endsWith('.xlsx') || f.name.endsWith('.xls')
+        );
+
         try {
+            // ── Large Excel pipeline: POST /use/stream-csv ──────────────────
+            // Route directly when the agent produces Excel output AND an Excel
+            // file is attached. The server streams CSV; we collect → download.
+            if (isExcelAgent && hasExcelFile) {
+                addToast?.('Iniciando pipeline de streaming para Excel grande...', 'progress');
+
+                const filename = `${agent.name.replace(/\s+/g, '_')}_resultado`;
+                await oddityClient.customAgent.useStreamCsv(
+                    formData,
+                    filename,
+                    (msg: string) => addToast?.(msg, 'progress'),
+                );
+
+                // Mark result as successfully streamed (no in-memory content)
+                setResult({ text: '__streamed__', type: 'excel' });
+                addToast?.('✓ Archivo CSV descargado correctamente', 'success');
+                return;
+            }
+
+            // ── Normal SSE path (chat, image, video, small files) ────────────
             addToast?.('Procesando documento con IA...', 'progress');
             const res = await oddityClient.customAgent.use(formData, (msg: string) => {
                 addToast?.(msg, 'progress');
             });
+
+            // Backend may redirect large Excel to the streaming endpoint
+            if ((res as any).__redirect) {
+                addToast?.('Redirigiendo a pipeline de streaming...', 'progress');
+                const filename = `${agent.name.replace(/\s+/g, '_')}_resultado`;
+                await oddityClient.customAgent.useStreamCsv(
+                    formData,
+                    filename,
+                    (msg: string) => addToast?.(msg, 'progress'),
+                );
+                setResult({ text: '__streamed__', type: 'excel' });
+                addToast?.('✓ Archivo CSV descargado correctamente', 'success');
+                return;
+            }
+
             const aiResponse = res.text || res.message || (typeof res === 'string' ? res : JSON.stringify(res));
-            // Use server's expectedOutput; fallback to agent's configured expectedOutput
             const outputType = res.expectedOutput || agent.expectedOutput || 'text';
 
             setResult({ text: aiResponse, type: outputType });
             addToast?.('✓ Procesamiento completado', 'success');
 
-            // AUTO DOWNLOAD for large files or excel mode
             if (outputType === 'excel') {
                 setTimeout(() => downloadExcel(aiResponse), 100);
             }
@@ -1717,6 +1755,7 @@ function AgentDocumentInterface({ agent, formVariants, inputClasses, cardClasses
             setSending(false);
         }
     };
+
 
     const downloadTxt = () => {
         const element = document.createElement("a");
@@ -1815,13 +1854,41 @@ function AgentDocumentInterface({ agent, formVariants, inputClasses, cardClasses
                                         <FileSpreadsheet size={32} />
                                     </div>
                                     <div className="text-center">
-                                        <p className="font-bold text-base">Excel Generado Correctamente</p>
-                                        <p className="text-xs opacity-50 mt-1">El archivo se ha descargado automáticamente. Contiene {result.text.split('\n').length} filas procesadas.</p>
+                                        <p className="font-bold text-base">CSV Generado Correctamente</p>
+                                        {result.text === '__streamed__' ? (
+                                            <p className="text-xs opacity-50 mt-1">
+                                                El archivo fue procesado mediante streaming y descargado directamente.
+                                            </p>
+                                        ) : (
+                                            <p className="text-xs opacity-50 mt-1">
+                                                El archivo se ha descargado automáticamente. Contiene {result.text.split('\n').length} filas procesadas.
+                                            </p>
+                                        )}
                                     </div>
-                                    <Button onClick={() => downloadExcel()} className="bg-green-600 hover:bg-green-700 text-white gap-2">
-                                        <Upload size={14} className="rotate-180" /> Descargar de Nuevo
-                                    </Button>
+                                    {result.text === '__streamed__' ? (
+                                        <Button
+                                            onClick={() => {
+                                                const formData = new FormData();
+                                                files.forEach(f => formData.append('files', f));
+                                                formData.append('customAgentId', agent.id.toString());
+                                                if (prompt) formData.append('prompt', prompt);
+                                                formData.append('history', JSON.stringify([]));
+                                                const filename = `${agent.name.replace(/\s+/g, '_')}_resultado`;
+                                                addToast?.('Re-descargando...', 'progress');
+                                                oddityClient.customAgent.useStreamCsv(formData, filename, (msg: string) => addToast?.(msg, 'progress'))
+                                                    .catch((e: any) => addToast?.(`Error: ${e.message}`, 'error'));
+                                            }}
+                                            className="bg-green-600 hover:bg-green-700 text-white gap-2"
+                                        >
+                                            <Upload size={14} className="rotate-180" /> Descargar de Nuevo
+                                        </Button>
+                                    ) : (
+                                        <Button onClick={() => downloadExcel()} className="bg-green-600 hover:bg-green-700 text-white gap-2">
+                                            <Upload size={14} className="rotate-180" /> Descargar de Nuevo
+                                        </Button>
+                                    )}
                                 </div>
+
                             ) : (
                                 result.text
                             )}
