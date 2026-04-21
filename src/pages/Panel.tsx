@@ -37,6 +37,21 @@ import { usePanelData } from '../hooks/usePanelData';
 import type { UserData } from '../lib/types';
 
 // ─────────────────────────────────────────────
+// Stream Download Utility
+// ─────────────────────────────────────────────
+const triggerStreamDownload = (jobId: string) => {
+    const downloadUrl = oddityClient.customAgent.getResultUrl(jobId);
+    if (!downloadUrl) return;
+    const link = document.createElement('a');
+    link.href = downloadUrl;
+    link.setAttribute('download', '');
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+};
+
+
+// ─────────────────────────────────────────────
 // Toast System
 // ─────────────────────────────────────────────
 type ToastType = 'success' | 'error' | 'info' | 'progress';
@@ -1310,7 +1325,18 @@ function AgentChatInterface({ agent, formVariants, inputClasses, cardClasses, ad
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [messages]);
 
+    const triggerStreamDownload = (jobId: string) => {
+        const downloadUrl = oddityClient.customAgent.getResultUrl(jobId);
+        const link = document.createElement('a');
+        link.href = downloadUrl;
+        link.setAttribute('download', '');
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    };
+
     const handleSend = async () => {
+
         if ((!input.trim() && files.length === 0) || sending) return;
         const userMsg = input;
         const currentFiles = [...files];
@@ -1367,6 +1393,8 @@ function AgentChatInterface({ agent, formVariants, inputClasses, cardClasses, ad
                     formDataRedirect,
                     (msg: string) => addToast?.(msg, 'progress'),
                 );
+                if (jobId) triggerStreamDownload(jobId);
+
 
 
                 setMessages(prev => [...prev, {
@@ -1395,6 +1423,7 @@ function AgentChatInterface({ agent, formVariants, inputClasses, cardClasses, ad
             setSending(false);
         }
     };
+
 
     const handleAutoDownload = async (content: string, type: string, agentName: string) => {
         const filename = `${agentName.replace(/\s+/g, '_')}_${new Date().getTime()}`;
@@ -1763,6 +1792,8 @@ function AgentDocumentInterface({ agent, formVariants, inputClasses, cardClasses
                     formData,
                     (msg: string) => addToast?.(msg, 'progress'),
                 );
+                if (jobId) triggerStreamDownload(jobId);
+
 
 
                 // Mark result as successfully streamed (no in-memory content)
@@ -1785,8 +1816,9 @@ function AgentDocumentInterface({ agent, formVariants, inputClasses, cardClasses
                     formData,
                     (msg: string) => addToast?.(msg, 'progress'),
                 );
-
+                if (jobId) triggerStreamDownload(jobId);
                 setResult({ text: '__streamed__', type: 'excel', jobId });
+
                 addToast?.('✓ Procesamiento completado', 'success');
                 return;
 
@@ -1935,6 +1967,9 @@ function AgentDocumentInterface({ agent, formVariants, inputClasses, cardClasses
 
                                                     addToast?.('Iniciando re-procesamiento...', 'progress');
                                                     oddityClient.customAgent.useStreamExcel(formData, (msg: string) => addToast?.(msg, 'progress'))
+                                                        .then(({ jobId }) => {
+                                                            if (jobId) triggerStreamDownload(jobId);
+                                                        })
                                                         .catch((e: any) => addToast?.(`Error: ${e.message}`, 'error'));
                                                 }
 
