@@ -1280,8 +1280,16 @@ function AgentChatView({ agentId, formVariants, inputClasses, cardClasses, addTo
     return <AgentChatInterface agent={agent} formVariants={formVariants} inputClasses={inputClasses} cardClasses={cardClasses} addToast={addToast} />;
 }
 
+interface Message {
+    role: string;
+    content: string;
+    files?: string[];
+    isStreamed?: boolean;
+}
+
 function AgentChatInterface({ agent, formVariants, inputClasses, cardClasses, addToast }: any) {
-    const [messages, setMessages] = useState<Array<{ role: string, content: string, files?: string[] }>>([]);
+    const [messages, setMessages] = useState<Message[]>([]);
+
     const [input, setInput] = useState('');
     const [files, setFiles] = useState<File[]>([]);
     const [sending, setSending] = useState(false);
@@ -1340,6 +1348,33 @@ function AgentChatInterface({ agent, formVariants, inputClasses, cardClasses, ad
                 });
             }
 
+            if ((res as any).__redirect) {
+                // Large Excel redirect in Chat mode
+                addToast?.('Redirigiendo a pipeline de streaming...', 'progress');
+                const filename = `${agent.name.replace(/\s+/g, '_')}_resultado`;
+
+                // Re-prepare formData since we need it for useStreamCsv
+                const formDataRedirect = new FormData();
+                currentFiles.forEach(f => formDataRedirect.append('files', f));
+                formDataRedirect.append('customAgentId', agent.id.toString());
+                formDataRedirect.append('prompt', userMsg);
+                formDataRedirect.append('history', JSON.stringify(historyDto));
+
+                await oddityClient.customAgent.useStreamCsv(
+                    formDataRedirect,
+                    filename,
+                    (msg: string) => addToast?.(msg, 'progress'),
+                );
+
+                setMessages(prev => [...prev, {
+                    role: 'ai',
+                    content: 'El archivo ha sido procesado mediante streaming y descargado automáticamente como CSV.',
+                    isStreamed: true
+                }]);
+                addToast?.('✓ Archivo descargado', 'success');
+                return;
+            }
+
             const aiResponse = res.text || res.message || (typeof res === 'string' ? res : JSON.stringify(res));
             setMessages(prev => [...prev, { role: 'ai', content: aiResponse }]);
 
@@ -1347,6 +1382,7 @@ function AgentChatInterface({ agent, formVariants, inputClasses, cardClasses, ad
             if (res.expectedOutput && res.expectedOutput !== 'text') {
                 handleAutoDownload(aiResponse, res.expectedOutput, agent.name);
             }
+
 
         } catch (e: any) {
             setMessages(prev => [...prev, { role: 'system', content: `Error: ${e.message}` }]);
@@ -1453,7 +1489,16 @@ function AgentChatInterface({ agent, formVariants, inputClasses, cardClasses, ad
                                         </span>
                                     </div>
 
-                                    {msg.content.length > 2000 && (msg.content.includes(';') || msg.content.includes(',')) ? (
+                                    {(msg.content.includes('__streamed__') || msg.isStreamed) ? (
+                                        <div className="p-3 bg-green-500/10 border border-green-500/20 rounded flex flex-col gap-2">
+                                            <p className="text-xs font-bold text-green-600 dark:text-green-400 flex items-center gap-1">
+                                                <FileSpreadsheet size={14} /> Streaming completado
+                                            </p>
+                                            <p className="text-[10px] opacity-60">
+                                                El archivo ha sido procesado mediante streaming y descargado automáticamente como CSV.
+                                            </p>
+                                        </div>
+                                    ) : msg.content.length > 2000 && (msg.content.includes(';') || msg.content.includes(',')) ? (
                                         <div className="p-3 bg-green-500/10 border border-green-500/20 rounded flex flex-col gap-2">
                                             <p className="text-xs font-bold text-green-600 dark:text-green-400 flex items-center gap-1">
                                                 <FileSpreadsheet size={14} /> Datos generados ({msg.content.split('\n').length} filas)
@@ -1469,6 +1514,8 @@ function AgentChatInterface({ agent, formVariants, inputClasses, cardClasses, ad
                                     ) : (
                                         <div className="whitespace-pre-wrap">{msg.content}</div>
                                     )}
+
+
 
                                     {msg.files && msg.files.length > 0 && (
                                         <div className="mt-3 pt-3 border-t border-current/10 flex flex-wrap gap-2 text-[10px] opacity-70">
@@ -1829,7 +1876,7 @@ function AgentDocumentInterface({ agent, formVariants, inputClasses, cardClasses
                         <div className="flex justify-between items-center w-full pb-4 border-b border-slate-100 dark:border-white/5">
                             <h3 className="font-bold text-lg flex items-center gap-2"><Bot className="text-primary" /> Resultado del Análisis</h3>
                             <div className="flex gap-2">
-                                {result.type === 'pdf' && (
+                                {result.type === 'pdf' && result.text !== '__streamed__' && (
                                     <PDFDownloadLink document={<ResultPDF content={result.text} title={agent.name} />} fileName={`${agent.name}_result.pdf`}>
                                         {({ loading }) => (
                                             <Button variant="outline" size="sm" className="bg-red-500/5 text-red-500 border-red-500/20">
@@ -1838,24 +1885,26 @@ function AgentDocumentInterface({ agent, formVariants, inputClasses, cardClasses
                                         )}
                                     </PDFDownloadLink>
                                 )}
-                                {result.type === 'excel' && (
+                                {result.type === 'excel' && !result.text.includes('__streamed__') && (
                                     <Button onClick={() => downloadExcel()} variant="outline" size="sm" className="bg-green-500/5 text-green-600 border-green-500/20">
                                         Descargar Excel
                                     </Button>
                                 )}
-                                <Button onClick={downloadTxt} variant="outline" size="sm">Descargar TXT</Button>
+                                {!result.text.includes('__streamed__') && <Button onClick={downloadTxt} variant="outline" size="sm">Descargar TXT</Button>}
+
+
                                 <Button onClick={() => { setResult(null); setFiles([]); setPrompt(''); }} className="bg-primary text-white">Nuevo Análisis</Button>
                             </div>
                         </div>
                         <div className="p-6 bg-slate-50 dark:bg-[#080808] border border-slate-200 dark:border-white/5 text-sm w-full whitespace-pre-wrap leading-relaxed shadow-sm rounded-sm font-medium opacity-90 overflow-x-auto">
-                            {result.type === 'excel' ? (
+                            {result.type === 'excel' || result.text.includes('__streamed__') ? (
                                 <div className="flex flex-col items-center py-10 gap-4">
                                     <div className="w-16 h-16 bg-green-500/10 text-green-500 rounded-full flex items-center justify-center">
                                         <FileSpreadsheet size={32} />
                                     </div>
                                     <div className="text-center">
                                         <p className="font-bold text-base">CSV Generado Correctamente</p>
-                                        {result.text === '__streamed__' ? (
+                                        {result.text.includes('__streamed__') ? (
                                             <p className="text-xs opacity-50 mt-1">
                                                 El archivo fue procesado mediante streaming y descargado directamente.
                                             </p>
@@ -1865,7 +1914,7 @@ function AgentDocumentInterface({ agent, formVariants, inputClasses, cardClasses
                                             </p>
                                         )}
                                     </div>
-                                    {result.text === '__streamed__' ? (
+                                    {result.text.includes('__streamed__') ? (
                                         <Button
                                             onClick={() => {
                                                 const formData = new FormData();
@@ -1888,10 +1937,10 @@ function AgentDocumentInterface({ agent, formVariants, inputClasses, cardClasses
                                         </Button>
                                     )}
                                 </div>
-
                             ) : (
                                 result.text
                             )}
+
                         </div>
                     </div>
                 ) : (
