@@ -20,8 +20,15 @@ import {
     Paperclip,
     CheckCircle2,
     AlertCircle,
-    Info
+    Info,
+    Zap,
+    Target,
+    Plus,
+    Trello,
+    FileCode,
+    FileText,
 } from 'lucide-react';
+
 import { oddityClient } from '../lib/oddityClient';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useDropzone } from 'react-dropzone';
@@ -1310,6 +1317,8 @@ function AgentChatInterface({ agent, formVariants, inputClasses, cardClasses, ad
     const [input, setInput] = useState('');
     const [files, setFiles] = useState<File[]>([]);
     const [sending, setSending] = useState(false);
+
+
     const messagesEndRef = useRef<any>(null);
 
     const onDrop = (acceptedFiles: File[]) => {
@@ -1389,19 +1398,25 @@ function AgentChatInterface({ agent, formVariants, inputClasses, cardClasses, ad
                 formDataRedirect.append('prompt', userMsg);
                 formDataRedirect.append('history', JSON.stringify(historyDto));
 
-                const { jobId } = await oddityClient.customAgent.useStreamExcel(
+                const streamResult = await oddityClient.customAgent.useStreamExcel(
                     formDataRedirect,
                     (msg: string) => addToast?.(msg, 'progress'),
                 );
-                if (jobId) triggerStreamDownload(jobId);
-
-
+                
+                if (streamResult.jobId) triggerStreamDownload(streamResult.jobId);
+                if (streamResult.tokens || streamResult.cost) {
+                    setProcessingCost({
+                        tokens: streamResult.tokens,
+                        cost: streamResult.cost,
+                        elapsed: streamResult.elapsed
+                    });
+                }
 
                 setMessages(prev => [...prev, {
                     role: 'ai',
                     content: 'El archivo ha sido procesado mediante streaming y descargado automáticamente.',
                     isStreamed: true,
-                    jobId // Store jobId in the message
+                    jobId: streamResult.jobId // Store jobId in the message
                 }]);
                 addToast?.('✓ Archivo procesado', 'success');
                 return;
@@ -1752,8 +1767,15 @@ const ResultPDF = ({ content, title }: any) => {
 function AgentDocumentInterface({ agent, formVariants, inputClasses, cardClasses, addToast }: any) {
     const [files, setFiles] = useState<File[]>([]);
     const [prompt, setPrompt] = useState('');
+    const [advancedMode, setAdvancedMode] = useState(false);
+    const [formatFile, setFormatFile] = useState<File | null>(null);
+    const [inputFile, setInputFile] = useState<File | null>(null);
+    const [supportFiles, setSupportFiles] = useState<File[]>([]);
+
     const [sending, setSending] = useState(false);
     const [result, setResult] = useState<{ text: string, type: string, jobId?: string } | null>(null);
+    const [processingCost, setProcessingCost] = useState<{ tokens?: { input: number; output: number }, cost?: number, elapsed?: number } | null>(null);
+
 
 
     const onDrop = (acceptedFiles: File[]) => {
@@ -1766,38 +1788,56 @@ function AgentDocumentInterface({ agent, formVariants, inputClasses, cardClasses
     });
 
     const handleSend = async () => {
-        if (files.length === 0 || sending) return;
+        if (sending) return;
+        if (!advancedMode && files.length === 0) return;
+        if (advancedMode && !inputFile) {
+            addToast?.('El archivo principal es obligatorio en modo avanzado', 'error');
+            return;
+        }
+
         setSending(true);
         setResult(null);
 
         const formData = new FormData();
-        files.forEach(f => formData.append('files', f));
         formData.append('customAgentId', agent.id.toString());
-        if (prompt) formData.append('prompt', prompt);
+        formData.append('prompt', prompt || 'Analizar y procesar los datos');
         formData.append('history', JSON.stringify([]));
 
+        if (advancedMode) {
+            if (formatFile) formData.append('formatFile', formatFile);
+            if (inputFile) formData.append('inputFile', inputFile);
+            supportFiles.forEach(f => formData.append('supportFiles', f));
+        } else {
+            files.forEach(f => formData.append('files', f));
+        }
+
         const isExcelAgent = agent.expectedOutput === 'excel';
-        const hasExcelFile = files.some(f =>
-            f.name.endsWith('.xlsx') || f.name.endsWith('.xls')
-        );
+        const hasExcelFile = advancedMode
+            ? (inputFile?.name.endsWith('.xlsx') || inputFile?.name.endsWith('.xls'))
+            : files.some(f => f.name.endsWith('.xlsx') || f.name.endsWith('.xls'));
 
         try {
-            // ── Large Excel pipeline: POST /use/stream-csv ──────────────────
-            // Route directly when the agent produces Excel output AND an Excel
-            // file is attached. The server streams CSV; we collect → download.
-            if (isExcelAgent && hasExcelFile) {
-                addToast?.('Iniciando pipeline de streaming para Excel grande...', 'progress');
+            if (isExcelAgent && (hasExcelFile || advancedMode)) {
+                addToast?.('Iniciando pipeline de streaming para Excel...', 'progress');
 
-                const { jobId } = await oddityClient.customAgent.useStreamExcel(
+                const result = await oddityClient.customAgent.useStreamExcel(
                     formData,
                     (msg: string) => addToast?.(msg, 'progress'),
                 );
-                if (jobId) triggerStreamDownload(jobId);
-
-
+                
+                if (result.jobId) triggerStreamDownload(result.jobId);
+                
+                // Capture cost information
+                if (result.tokens || result.cost) {
+                    setProcessingCost({
+                        tokens: result.tokens,
+                        cost: result.cost,
+                        elapsed: result.elapsed
+                    });
+                }
 
                 // Mark result as successfully streamed (no in-memory content)
-                setResult({ text: '__streamed__', type: 'excel', jobId });
+                setResult({ text: '__streamed__', type: 'excel', jobId: result.jobId });
                 addToast?.('✓ Procesamiento completado', 'success');
                 return;
             }
@@ -1812,12 +1852,20 @@ function AgentDocumentInterface({ agent, formVariants, inputClasses, cardClasses
             // Backend may redirect large Excel to the streaming endpoint
             if ((res as any).__redirect) {
                 addToast?.('Redirigiendo a pipeline de streaming...', 'progress');
-                const { jobId } = await oddityClient.customAgent.useStreamExcel(
+                const streamRes = await oddityClient.customAgent.useStreamExcel(
                     formData,
                     (msg: string) => addToast?.(msg, 'progress'),
                 );
-                if (jobId) triggerStreamDownload(jobId);
-                setResult({ text: '__streamed__', type: 'excel', jobId });
+                
+                if (streamRes.jobId) triggerStreamDownload(streamRes.jobId);
+                if (streamRes.tokens || streamRes.cost) {
+                    setProcessingCost({
+                        tokens: streamRes.tokens,
+                        cost: streamRes.cost,
+                        elapsed: streamRes.elapsed
+                    });
+                }
+                setResult({ text: '__streamed__', type: 'excel', jobId: streamRes.jobId });
 
                 addToast?.('✓ Procesamiento completado', 'success');
                 return;
@@ -1912,7 +1960,25 @@ function AgentDocumentInterface({ agent, formVariants, inputClasses, cardClasses
                 {result ? (
                     <div className="w-full flex-1 flex flex-col items-start text-left space-y-4">
                         <div className="flex justify-between items-center w-full pb-4 border-b border-slate-100 dark:border-white/5">
-                            <h3 className="font-bold text-lg flex items-center gap-2"><Bot className="text-primary" /> Resultado del Análisis</h3>
+                            <div className="flex flex-col gap-2">
+                                <h3 className="font-bold text-lg flex items-center gap-2"><Bot className="text-primary" /> Resultado del Análisis</h3>
+                                {processingCost && (
+                                    <div className="flex gap-4 text-xs font-mono text-slate-500 dark:text-slate-400">
+                                        {processingCost.tokens && (
+                                            <>
+                                                <span>📥 Input: {processingCost.tokens.input.toLocaleString()} tokens</span>
+                                                <span>📤 Output: {processingCost.tokens.output.toLocaleString()} tokens</span>
+                                            </>
+                                        )}
+                                        {processingCost.cost !== undefined && (
+                                            <span className="text-primary font-bold">💰 Costo: ${processingCost.cost.toFixed(6)}</span>
+                                        )}
+                                        {processingCost.elapsed && (
+                                            <span>⏱️ {(processingCost.elapsed / 1000).toFixed(2)}s</span>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
                             <div className="flex gap-2">
                                 {result.type === 'pdf' && result.text !== '__streamed__' && (
                                     <PDFDownloadLink document={<ResultPDF content={result.text} title={agent.name} />} fileName={`${agent.name}_result.pdf`}>
@@ -1992,58 +2058,185 @@ function AgentDocumentInterface({ agent, formVariants, inputClasses, cardClasses
                     </div>
                 ) : (
                     <div className="w-full h-full flex flex-col">
-                        <div
-                            {...getRootProps()}
-                            className={cn("flex-1 min-h-[300px] flex flex-col items-center justify-center border-2 border-dashed transition-all cursor-pointer rounded-sm p-8",
-                                isDragActive ? "border-primary bg-primary/5 shadow-inner" : "border-slate-300 dark:border-white/10 bg-slate-50 dark:bg-white/2 hover:border-slate-400 dark:hover:border-white/20")}
-                        >
-                            <input {...getInputProps()} />
-                            <div className="w-20 h-20 bg-red-500/10 flex items-center justify-center mb-6 text-red-500 rounded-full shadow-sm">
-                                <FileSpreadsheet size={40} />
+                        <div className="flex items-center justify-between mb-4 px-1">
+                            <div>
+                                <h3 className="text-lg font-black tracking-tight underline ornament-primary">Cargar Documentos</h3>
+                                <p className="text-[10px] opacity-40 font-bold uppercase tracking-widest">Configura tus archivos para el procesamiento</p>
                             </div>
-
-                            <h3 className="text-2xl font-black mb-2">Cargar Documentos</h3>
-                            <p className="opacity-40 text-sm max-w-sm mb-6">
-                                Arrastra tus archivos o haz clic para seleccionarlos. Admite múltiples archivos (PDF, CSV, XLSX, TXT).
-                            </p>
-
-                            {files.length > 0 && (
-                                <div className="w-full max-w-md space-y-2 mb-4">
-                                    <p className="text-[10px] font-black uppercase tracking-widest opacity-40 text-left w-full pl-1">Archivos seleccionados ({files.length})</p>
-                                    <div className="max-h-32 overflow-y-auto custom-scrollbar border border-slate-100 dark:border-white/5 rounded p-2 bg-white/5">
-                                        {files.map((file, i) => (
-                                            <div key={i} className="flex items-center gap-3 text-xs font-bold py-1.5 px-3 border-b last:border-0 border-slate-100 dark:border-white/5">
-                                                <Upload size={14} className="opacity-30" />
-                                                <span className="truncate flex-1 text-left">{file.name}</span>
-                                                <span className="opacity-30 text-[9px]">{(file.size / 1024).toFixed(0)} KB</span>
-                                                <button onClick={(e) => { e.stopPropagation(); setFiles(prev => prev.filter((_, idx) => idx !== i)); }} className="text-red-500 p-1 hover:bg-red-500/10 rounded">
-                                                    <X size={14} />
-                                                </button>
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
-                            )}
+                            <div className="flex items-center gap-2 bg-slate-100 dark:bg-white/5 p-1 rounded-full border border-slate-200 dark:border-white/10">
+                                <button
+                                    onClick={() => setAdvancedMode(false)}
+                                    className={cn("px-3 py-1 text-[10px] font-black uppercase tracking-tighter rounded-full transition-all", !advancedMode ? "bg-white dark:bg-white/10 shadow-sm text-primary" : "opacity-40 hover:opacity-100")}
+                                >
+                                    Simple
+                                </button>
+                                <button
+                                    onClick={() => setAdvancedMode(true)}
+                                    className={cn("px-3 py-1 text-[10px] font-black uppercase tracking-tighter rounded-full transition-all", advancedMode ? "bg-white dark:bg-white/10 shadow-sm text-primary" : "opacity-40 hover:opacity-100")}
+                                >
+                                    Avanzado
+                                </button>
+                            </div>
                         </div>
 
-                        <div className="w-full mt-8 flex flex-col gap-4">
+                        {!advancedMode ? (
+                            <div
+                                {...getRootProps()}
+                                className={cn("flex-1 min-h-[250px] flex flex-col items-center justify-center border-2 border-dashed transition-all cursor-pointer rounded-sm p-8 bg-slate-50 dark:bg-white/2 hover:border-slate-400 border-slate-300 dark:border-white/10",
+                                    isDragActive && "border-primary bg-primary/5")}
+                            >
+                                <input {...getInputProps()} />
+                                <div className="w-16 h-16 bg-red-500/10 flex items-center justify-center mb-4 text-red-500 rounded-full shadow-sm">
+                                    <FileSpreadsheet size={32} />
+                                </div>
+                                <h4 className="text-xl font-black mb-1">Arrastra tus archivos</h4>
+                                <p className="opacity-40 text-[11px] max-w-xs text-center mb-4">Múltiples archivos permitidos (PDF, CSV, XLSX, TXT)</p>
+
+                                {files.length > 0 && (
+                                    <div className="w-full max-w-md space-y-2">
+                                        <div className="max-h-32 overflow-y-auto custom-scrollbar border border-slate-100 dark:border-white/5 rounded p-1 bg-white/5">
+                                            {files.map((file, i) => (
+                                                <div key={i} className="flex items-center gap-3 text-[10px] font-bold py-1.5 px-3 border-b last:border-0 border-slate-100 dark:border-white/5">
+                                                    <Upload size={12} className="opacity-30" />
+                                                    <span className="truncate flex-1 text-left">{file.name}</span>
+                                                    <button onClick={(e) => { e.stopPropagation(); setFiles(prev => prev.filter((_, idx) => idx !== i)); }} className="text-red-500 p-1 hover:bg-red-500/10 rounded">
+                                                        <X size={12} />
+                                                    </button>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        ) : (
+                            <div className="flex-1 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 min-h-[300px]">
+                                {/* FORMAT FILE */}
+                                <div className="bg-slate-50 dark:bg-white/2 border border-slate-200 dark:border-white/10 rounded-sm p-4 flex flex-col">
+                                    <div className="flex items-center justify-between mb-2">
+                                        <label className="text-[10px] font-black uppercase tracking-widest opacity-60">1. Plantilla / Formato</label>
+                                        {formatFile && <CheckCircle2 size={14} className="text-green-500" />}
+                                    </div>
+                                    <div className="flex-1 flex flex-col items-center justify-center border border-dashed border-slate-300 dark:border-white/20 rounded relative min-h-[120px] p-2 hover:bg-white/5 transition-colors group">
+                                        <input
+                                            type="file"
+                                            onChange={(e) => setFormatFile(e.target.files?.[0] || null)}
+                                            className="absolute inset-0 opacity-0 cursor-pointer z-10"
+                                        />
+                                        {!formatFile ? (
+                                            <div className="text-center">
+                                                <div className="mx-auto w-10 h-10 bg-blue-500/10 flex items-center justify-center text-blue-500 rounded mb-2 group-hover:scale-110 transition-transform">
+                                                    <Trello size={18} />
+                                                </div>
+                                                <p className="text-[10px] font-bold opacity-40">Click para subir plantilla</p>
+                                            </div>
+                                        ) : (
+                                            <div className="w-full">
+                                                <div className="flex items-center gap-2 text-[10px] font-black bg-blue-500/10 p-2 rounded text-blue-600 dark:text-blue-400">
+                                                    <FileText size={14} />
+                                                    <span className="truncate flex-1 text-left">{formatFile.name}</span>
+                                                    <button onClick={() => setFormatFile(null)} className="z-20 text-red-500"><X size={14} /></button>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                    <p className="text-[9px] opacity-30 mt-2 italic">* Opcional: Define las columnas de salida.</p>
+                                </div>
+
+                                {/* INPUT FILE */}
+                                <div className="bg-slate-50 dark:bg-white/2 border-primary/30 border-2 rounded-sm p-4 flex flex-col shadow-lg shadow-primary/5">
+
+                                    <div className="flex items-center justify-between mb-2">
+                                        <label className="text-[10px] font-black uppercase tracking-widest text-primary">2. Archivo Principal</label>
+                                        {inputFile && <CheckCircle2 size={14} className="text-primary" />}
+                                    </div>
+                                    <div className="flex-1 flex flex-col items-center justify-center border border-dashed border-primary/30 rounded relative min-h-[120px] p-2 hover:bg-primary/5 transition-colors group">
+                                        <input
+                                            type="file"
+                                            onChange={(e) => setInputFile(e.target.files?.[0] || null)}
+                                            className="absolute inset-0 opacity-0 cursor-pointer z-10"
+                                        />
+                                        {!inputFile ? (
+                                            <div className="text-center">
+                                                <div className="mx-auto w-10 h-10 bg-primary/10 flex items-center justify-center text-primary rounded mb-2 group-hover:scale-110 transition-transform">
+                                                    <Target size={18} />
+                                                </div>
+                                                <p className="text-[10px] font-bold opacity-60">Click para subir el principal</p>
+                                            </div>
+                                        ) : (
+                                            <div className="w-full">
+                                                <div className="flex items-center gap-2 text-[10px] font-black bg-primary/10 p-2 rounded text-primary">
+                                                    <FileSpreadsheet size={14} />
+                                                    <span className="truncate flex-1 text-left">{inputFile.name}</span>
+                                                    <button onClick={() => setInputFile(null)} className="z-20 text-red-500"><X size={14} /></button>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                    <p className="text-[9px] opacity-60 mt-2 font-bold text-primary">* Obligatorio: El archivo a procesar.</p>
+                                </div>
+
+                                {/* SUPPORT FILES */}
+                                <div className="bg-slate-50 dark:bg-white/2 border border-slate-200 dark:border-white/10 rounded-sm p-4 flex flex-col">
+                                    <div className="flex items-center justify-between mb-2">
+                                        <label className="text-[10px] font-black uppercase tracking-widest opacity-60">3. Archivos de Apoyo</label>
+                                        {supportFiles.length > 0 && <CheckCircle2 size={14} className="text-slate-400" />}
+                                    </div>
+                                    <div className="flex-1 flex flex-col border border-dashed border-slate-300 dark:border-white/20 rounded relative min-h-[120px] p-2 hover:bg-white/5 transition-colors overflow-hidden">
+                                        <input
+                                            type="file"
+                                            multiple
+                                            onChange={(e) => {
+                                                const newFiles = Array.from(e.target.files || []);
+                                                setSupportFiles(prev => [...prev, ...newFiles]);
+                                            }}
+                                            className="absolute inset-x-0 top-0 h-10 opacity-0 cursor-pointer z-10"
+                                        />
+                                        <div className="text-center mb-2 h-10 flex items-center justify-center border-b border-white/5">
+                                            <p className="text-[10px] font-bold opacity-40 flex items-center gap-2"><Plus size={12} /> Añadir Apoyo</p>
+                                        </div>
+                                        <div className="flex-1 overflow-y-auto custom-scrollbar space-y-1">
+                                            {supportFiles.length === 0 ? (
+                                                <div className="h-full flex items-center justify-center opacity-20"><Info size={24} /></div>
+                                            ) : (
+                                                supportFiles.map((f, i) => (
+                                                    <div key={i} className="flex items-center gap-2 text-[9px] font-bold bg-white/5 p-1 px-2 rounded group">
+                                                        <FileCode size={12} className="opacity-40" />
+                                                        <span className="truncate flex-1 text-left">{f.name}</span>
+                                                        <button onClick={() => setSupportFiles(prev => prev.filter((_, idx) => idx !== i))} className="text-red-500 opacity-0 group-hover:opacity-100"><X size={12} /></button>
+                                                    </div>
+                                                ))
+                                            )}
+                                        </div>
+                                    </div>
+                                    <p className="text-[9px] opacity-30 mt-2 italic">* Opcional: Contexto extra (precios, clientes).</p>
+                                </div>
+                            </div>
+                        )}
+
+                        <div className="w-full mt-6 flex flex-col gap-4">
                             <div className="space-y-1">
                                 <label className="text-[9px] font-black uppercase tracking-[0.2em] opacity-40 block pl-1">Instrucciones de Análisis</label>
                                 <textarea
                                     value={prompt}
                                     onChange={e => setPrompt(e.target.value)}
-                                    rows={3}
-                                    placeholder="Instrucciones adicionales para analizar los archivos..."
-                                    className={cn(inputClasses, "resize-none leading-relaxed")}
+                                    rows={2}
+                                    placeholder="Instrucciones adicionales para la IA..."
+                                    className={cn(inputClasses, "resize-none leading-relaxed text-xs")}
                                 />
                             </div>
 
-                            <Button onClick={handleSend} disabled={files.length === 0 || sending} className="w-full py-4 bg-primary text-white font-black text-xs uppercase tracking-[0.2em] flex items-center justify-center gap-3 shadow-lg shadow-primary/20 hover:shadow-primary/40 transition-all">
-                                {sending ? <Loader2 className="animate-spin w-5 h-5" /> : <Upload className="w-5 h-5" />}
-                                {sending ? 'Procesando archivos...' : 'Ejecutar Análisis Completo'}
+                            <Button
+                                onClick={handleSend}
+                                disabled={(!advancedMode && files.length === 0) || (advancedMode && !inputFile) || sending}
+                                className={cn("w-full py-4 font-black text-xs uppercase tracking-[0.2em] flex items-center justify-center gap-3 shadow-lg transition-all",
+                                    sending ? "bg-slate-300 dark:bg-white/10" : "bg-primary text-white shadow-primary/20 hover:shadow-primary/40")}
+                            >
+                                {sending ? <Loader2 className="animate-spin w-5 h-5" /> : <Zap className="w-5 h-5" />}
+                                {sending ? 'Procesando con IA...' : 'Generar Archivo de Salida'}
                             </Button>
                         </div>
                     </div>
+
                 )}
             </div>
         </motion.div>

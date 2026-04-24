@@ -229,9 +229,8 @@ export const oddityClient = {
         useStreamExcel: async (
             data: FormData,
             onProgress?: (msg: string) => void,
-        ): Promise<{ jobId: string }> => {
+        ): Promise<{ jobId: string; tokens?: { input: number; output: number }; cost?: number; elapsed?: number }> => {
             if (onProgress) onProgress('Iniciando procesamiento de Excel...');
-
 
             const response = await fetch(`${API_URL}/api/custom-agent/use/stream-excel`, {
                 method: 'POST',
@@ -249,6 +248,7 @@ export const oddityClient = {
 
             const decoder = new TextDecoder();
             let finalJobId = '';
+            let costInfo: { tokens?: { input: number; output: number }; cost?: number; elapsed?: number } = {};
 
             try {
                 while (true) {
@@ -266,13 +266,17 @@ export const oddityClient = {
                                     if (onProgress) onProgress(parsed.message);
                                 } else if (parsed.type === 'complete') {
                                     finalJobId = parsed.jobId;
+                                    costInfo = {
+                                        tokens: parsed.tokens,
+                                        cost: parsed.cost,
+                                        elapsed: parsed.elapsed
+                                    };
                                     if (onProgress) onProgress('✓ Procesamiento completo. Iniciando descarga...');
 
                                     // Trigger final download from the permanent storage
                                     const downloadUrl = `${API_URL}/api/custom-agent/download/${finalJobId}`;
                                     window.open(downloadUrl, '_blank');
                                 } else if (parsed.type === 'error') {
-
                                     throw new Error(parsed.message);
                                 }
                             } catch (e: any) {
@@ -285,7 +289,7 @@ export const oddityClient = {
                 reader.releaseLock();
             }
 
-            return { jobId: finalJobId };
+            return { jobId: finalJobId, ...costInfo };
         },
 
 
